@@ -2,6 +2,7 @@ import type { AppConfig } from "./config"
 import { withTimeout } from "./async"
 
 const REMOTE_REQUEST_TIMEOUT_MS = 8 * 1000
+const NEW_MODULE_DISABLE_TIMEOUT_MS = 2500
 
 export type RemoteConnectionResult = {
   latencyMs: number
@@ -78,7 +79,8 @@ export async function testRemoteConnection(cfg: AppConfig): Promise<RemoteConnec
 export async function setRemoteModuleEnabled(
   cfg: AppConfig,
   moduleName: string,
-  enabled: boolean
+  enabled: boolean,
+  timeoutMs = REMOTE_REQUEST_TIMEOUT_MS,
 ): Promise<void> {
   const baseURL = getRemoteBaseURL(cfg)
   if (!baseURL) throw new Error("请先配置 HTTP 远程控制端口")
@@ -91,8 +93,31 @@ export async function setRemoteModuleEnabled(
       headers: remoteHeaders(cfg),
       body: JSON.stringify({ [moduleName]: enabled }),
     }),
-    REMOTE_REQUEST_TIMEOUT_MS,
-    `远程开关请求超时（${REMOTE_REQUEST_TIMEOUT_MS / 1000}s）`,
+    timeoutMs,
+    `远程开关请求超时（${timeoutMs / 1000}s）`,
   )
   if (!res?.ok) throw new Error(`请求失败：${res?.status ?? "unknown"}`)
+}
+
+/**
+ * A newly written local module must not silently change the active profile.
+ * Surge normally keeps a new module disabled; when the file is written through
+ * Scripting/iCloud, the HTTP API is used as a best-effort guard for versions
+ * that discover the file and enable it during the same refresh.
+ *
+ * This intentionally does not throw: a missing HTTP API must not make a file
+ * import fail, and existing modules are never passed through this helper.
+ */
+export async function disableNewModuleByDefault(
+  cfg: AppConfig,
+  moduleName: string,
+): Promise<boolean> {
+  const name = String(moduleName ?? "").trim()
+  if (!name || !getRemoteBaseURL(cfg)) return false
+  try {
+    await setRemoteModuleEnabled(cfg, name, false, NEW_MODULE_DISABLE_TIMEOUT_MS)
+    return true
+  } catch {
+    return false
+  }
 }

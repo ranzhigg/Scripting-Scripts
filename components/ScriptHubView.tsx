@@ -38,9 +38,11 @@ import {
   type ScriptHubTargetFormat,
 } from "../utils/script_hub_adapter"
 import { fetchSourceText } from "../utils/source_fetcher"
+import { disableNewModuleByDefault, getModuleRemoteName } from "../utils/remote_control"
 import {
   ensureStorage,
   getModulesDirResolved,
+  loadModuleAtPath,
   loadModules,
   type ModuleInfo,
 } from "../utils/storage"
@@ -976,10 +978,15 @@ export function ScriptHubView(props: { onImported?: () => void; tag?: number; ta
       }
       const result = await downloadModule(info, { mode: "direct" })
       if (!result.ok) throw new Error(result.message ?? "转换文件下载失败")
-      recordRecentImport(info)
+      const saved = await loadModuleAtPath(result.path ?? "")
+      const savedInfo = saved ?? info
+      const disabled = await disableNewModuleByDefault(nextCfg, getModuleRemoteName(savedInfo))
+      recordRecentImport(savedInfo)
       props.onImported?.()
       setStatus(`已写入：${name}`)
-      await Dialog.alert({ message: `转换模块已写入 Surge 模块目录\n${name}` })
+      await Dialog.alert({
+        message: `转换模块已写入 Surge 模块目录\n${name}${disabled ? "\n首次添加默认关闭" : ""}`,
+      })
     } catch (e: any) {
       const message = String(e?.message ?? e)
       setStatus(`写入失败：${message}`)

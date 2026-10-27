@@ -12,6 +12,7 @@ import {
   type ModuleInfo,
 } from "./storage"
 import { downloadModule, writeModuleText } from "./downloader"
+import { disableNewModuleByDefault, getModuleRemoteName } from "./remote_control"
 import { isSameRemoteUrl, parseScriptHubImport, sanitizeModuleName } from "./deep_link_import"
 import { withTimeout } from "./async"
 import { recordRecentImport } from "./recent_imports"
@@ -344,11 +345,15 @@ async function runSharedSourceConversion(
     IMPORT_STAGE_TIMEOUT_MS,
     `读取转换结果超时（${IMPORT_STAGE_TIMEOUT_MS / 1000}s）：${name}`,
   )
+  const savedInfo = saved ?? info
+  const disabled = !sameName
+    ? await disableNewModuleByDefault(loadConfig(), getModuleRemoteName(savedInfo))
+    : false
   if (info.category) persistCategory(info.category)
-  recordRecentImport(saved ?? info)
+  recordRecentImport(savedInfo)
   log(`shared source stage: write verified at ${result.path ?? "unknown"}`)
   return {
-    text: `分享链接已转换并写入 Surge 模块：${name}\n写入路径：${result.path ?? "未返回路径"}\n来源格式：${sourceFormat}\n目标格式：${targetFormat}\n分类：${importCategory}\n请回到 Surge 刷新或重新启用该本地模块。`,
+    text: `分享链接已转换并写入 Surge 模块：${name}\n写入路径：${result.path ?? "未返回路径"}\n来源格式：${sourceFormat}\n目标格式：${targetFormat}\n分类：${importCategory}${disabled ? "\n首次添加默认关闭" : ""}\n请回到 Surge 刷新或重新启用该本地模块。`,
     logs: [],
   }
 }
@@ -421,6 +426,7 @@ async function runLocalFileImport(
   const imported: { name: string; path: string; replaced: boolean }[] = []
   const errors: string[] = []
   const occupiedNames = new Set<string>()
+  const newlyAddedRemoteNames = new Set<string>()
 
   for (const rawSource of files) {
     let name = "本地模块"
@@ -468,12 +474,27 @@ async function runLocalFileImport(
       )
       if (saved?.category) persistCategory(saved.category)
       recordRecentImport(saved ?? { name, link: "", category: existing?.category })
+      if (!existing) {
+        newlyAddedRemoteNames.add(getModuleRemoteName(saved ?? { name }))
+      }
       imported.push({ name, path: result.path ?? targetPath, replaced: !!existing })
       log(`local import stage: write verified at ${result.path ?? "unknown"}`)
     } catch (e: any) {
       const message = String(e?.message ?? e)
       errors.push(`${name}: ${message}`)
       log(`local file import failed: ${name}: ${message}`)
+    }
+  }
+
+  if (newlyAddedRemoteNames.size) {
+    const outcomes = await Promise.all(
+      Array.from(newlyAddedRemoteNames).map((remoteName) =>
+        disableNewModuleByDefault(loadConfig(), remoteName)
+      ),
+    )
+    const disabledCount = outcomes.filter(Boolean).length
+    if (disabledCount) {
+      log(`local import default-off: ${disabledCount}/${newlyAddedRemoteNames.size}`)
     }
   }
 
@@ -547,18 +568,22 @@ async function runScriptHubImport(
     IMPORT_STAGE_TIMEOUT_MS,
     `读取导入结果超时（${IMPORT_STAGE_TIMEOUT_MS / 1000}s）：${request.name}`,
   )
-  if (saved?.category) persistCategory(saved.category)
-  recordRecentImport(saved ?? {
+  const savedInfo = saved ?? {
     name: request.name,
     link: request.url,
     category: request.category ?? sameName?.category,
-  })
+  }
+  const disabled = !sameName
+    ? await disableNewModuleByDefault(loadConfig(), getModuleRemoteName(savedInfo))
+    : false
+  if (savedInfo.category) persistCategory(savedInfo.category)
+  recordRecentImport(savedInfo)
 
   const state = sameName ? "已更新" : "已导入"
   log(`import stage: write verified at ${result.path ?? "unknown"}`)
   log(`Script-Hub import completed: ${request.name}`)
   return {
-    text: `Surge 本地模块${state}：${request.name}\n写入路径：${result.path ?? "未返回路径"}\n请回到 Surge 刷新或重新启用该本地模块。`,
+    text: `Surge 本地模块${state}：${request.name}\n写入路径：${result.path ?? "未返回路径"}${disabled ? "\n首次添加默认关闭" : ""}\n请回到 Surge 刷新或重新启用该本地模块。`,
     logs: [],
   }
 }

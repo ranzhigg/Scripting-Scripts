@@ -28,6 +28,7 @@ import {
   loadModules,
   moduleFilePath,
   detectLinkPrefix,
+  loadModuleAtPath,
   removeModuleFile,
   sortModules,
   type ModuleInfo,
@@ -44,6 +45,7 @@ import { RemoteControlView } from "./RemoteControlView"
 import { SettingsView } from "./SettingsView"
 import { useMarkdownReleaseNotesSheet } from "./ReleaseNotesSheet"
 import {
+  disableNewModuleByDefault,
   fetchEnabledModuleNames,
   getModuleRemoteName,
   setRemoteModuleEnabled,
@@ -810,9 +812,11 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
     setProgress(null)
     try {
       persistModuleCategory(info.category)
+      let addedModule: ModuleInfo | undefined
       if (info.isLocal) {
         setStage(`保存模块：${info.name}`)
         await saveLocalModule(info, info.content ?? "")
+        addedModule = info
         recordRecentImport(info)
         setStage("添加完成（已保存）")
       } else {
@@ -822,11 +826,19 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
           await Dialog.alert({ message: res.message ?? "下载失败" })
           setStage("添加完成（下载失败）")
         } else {
-          recordRecentImport(info)
+          addedModule = await loadModuleAtPath(res.path ?? moduleFilePath(info.name, info.saveDir)) ?? info
+          recordRecentImport(addedModule)
           setStage("添加完成（已下载）")
         }
       }
+
+      if (addedModule) {
+        const remoteName = getModuleRemoteName(addedModule)
+        const disabled = await disableNewModuleByDefault(loadConfig(), remoteName)
+        if (disabled) setStage(`添加完成（默认关闭：${remoteName}）`)
+      }
       await refreshModules()
+      await refreshRemoteModules(true, loadConfig())
       await syncMetadataIfNeeded()
     } catch (e: any) {
       setStage(`添加失败：${String(e?.message ?? e)}`)
