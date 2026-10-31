@@ -22,6 +22,7 @@ export type ModuleInfo = {
 
 const BASE_DIR_NAME = "SurgeModulesManager"
 const MODULES_DIR_NAME = "Modules"
+const LEGACY_RESOURCE_DIR_NAME = ".scripting-resources"
 const BUILTIN_LINK_PREFIXES = ["#!url=", "#SUBSCRIBED"]
 
 function fmOrThrow(): any {
@@ -267,6 +268,70 @@ async function isDirectory(path: string): Promise<boolean> {
   if (typeof fm.isDirectory === "function") return !!(await fm.isDirectory(path))
   if (typeof fm.isDir === "function") return !!(await fm.isDir(path))
   return false
+}
+
+async function removeTree(path: string): Promise<number> {
+  const fm = fmOrThrow()
+  if (!(await exists(path))) return 0
+
+  let removed = 0
+  if (await isDirectory(path) && typeof fm.readDirectory === "function") {
+    const entries = await fm.readDirectory(path)
+    if (Array.isArray(entries)) {
+      for (const entry of entries) {
+        const raw = String(entry)
+        const child = raw.includes("/") ? raw : Path.join(path, raw)
+        removed += await removeTree(child)
+      }
+    }
+  }
+
+  if (typeof fm.remove === "function") await fm.remove(path)
+  else if (typeof fm.removeSync === "function") fm.removeSync(path)
+  else throw new Error("FileManager.remove 不可用")
+  return removed + 1
+}
+
+async function removeLegacyResourceDirectories(dir: string): Promise<number> {
+  const fm = fmOrThrow()
+  if (!(await exists(dir)) || !(await isDirectory(dir)) || typeof fm.readDirectory !== "function") return 0
+
+  const entries = await fm.readDirectory(dir)
+  if (!Array.isArray(entries)) return 0
+
+  let removedDirectories = 0
+  for (const entry of entries) {
+    const raw = String(entry)
+    const child = raw.includes("/") ? raw : Path.join(dir, raw)
+    if (raw === LEGACY_RESOURCE_DIR_NAME || child.split("/").pop() === LEGACY_RESOURCE_DIR_NAME) {
+      await removeTree(child)
+      removedDirectories += 1
+      continue
+    }
+    if (await isDirectory(child)) {
+      removedDirectories += await removeLegacyResourceDirectories(child)
+    }
+  }
+  return removedDirectories
+}
+
+/**
+ * Remove only resource directories created by the pre-4.2.6 fallback path.
+ * Module files, backups, metadata, and the selected Surge bookmark are kept.
+ */
+export async function cleanupLegacyPrivateResources(): Promise<{
+  removedDirectories: number
+  skipped: boolean
+  path: string
+}> {
+  const legacyModulesDir = Path.join(pickRootDir(), BASE_DIR_NAME, MODULES_DIR_NAME)
+  const surgeRoot = await getSurgeBookmarkRoot()
+  if (surgeRoot && (isPathWithin(legacyModulesDir, surgeRoot) || isPathWithin(surgeRoot, legacyModulesDir))) {
+    return { removedDirectories: 0, skipped: true, path: legacyModulesDir }
+  }
+
+  const removedDirectories = await removeLegacyResourceDirectories(legacyModulesDir)
+  return { removedDirectories, skipped: false, path: legacyModulesDir }
 }
 
 async function listModuleFilesRecursive(dir: string): Promise<string[]> {

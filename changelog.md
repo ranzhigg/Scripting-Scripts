@@ -1,5 +1,9 @@
 # 更新日志
 
+## v4.2.7
+
+- 新增“清理旧私有资源”，仅删除旧版本生成的 `.scripting-resources`，保留模块、备份、分类和配置；检测到与当前 Surge 书签重叠时自动跳过。
+
 ## v4.2.6
 
 - 收紧资源本地化路径：只有在有效的 Surge iCloud 书签目录内才允许写入 `.scripting-resources`，不再回退到 Scripting 私有目录。

@@ -23,7 +23,13 @@ import {
   saveConfig,
   type AppConfig,
 } from "../utils/config"
-import { countModulesByCategory, getSurgeBookmarkRoot, loadCategoriesFromModules, renameCategoryInModules } from "../utils/storage"
+import {
+  cleanupLegacyPrivateResources,
+  countModulesByCategory,
+  getSurgeBookmarkRoot,
+  loadCategoriesFromModules,
+  renameCategoryInModules,
+} from "../utils/storage"
 import {
   exportMetadataToICloud,
   exportMetadataWithDocumentPicker,
@@ -349,6 +355,33 @@ export function SettingsView(props: {
     }
   }
 
+  async function cleanupLegacyPrivateResourcesAction() {
+    const confirmed = await Dialog.confirm({
+      title: "清理旧私有资源",
+      message: "只删除旧版本生成的 .scripting-resources，不会删除模块、备份或配置。确定继续吗？",
+    })
+    if (!confirmed) return
+
+    try {
+      const result = await cleanupLegacyPrivateResources()
+      if (result.skipped) {
+        await Dialog.alert({
+          title: "已跳过",
+          message: "当前 Surge 书签与旧目录重叠，为避免误删正在使用的资源，本次未清理。",
+        })
+        return
+      }
+      await Dialog.alert({
+        title: "清理完成",
+        message: result.removedDirectories
+          ? `已清理 ${result.removedDirectories} 个旧私有资源目录。\n模块和备份未受影响。`
+          : "没有发现旧私有资源目录。",
+      })
+    } catch (e: any) {
+      await Dialog.alert({ title: "清理失败", message: String(e?.message ?? e) })
+    }
+  }
+
   async function importMetadataAction() {
     if (metadataAction) return
     setMetadataAction("import")
@@ -528,6 +561,17 @@ export function SettingsView(props: {
                 })()
               }}
             />
+          </Section>
+
+          <Section
+            header={<Text>旧数据清理</Text>}
+            footer={(
+              <Text font="caption" foregroundStyle="secondaryLabel">
+                仅清理旧版本误用的私有 .scripting-resources 目录，不会删除模块、备份、分类或配置。
+              </Text>
+            )}
+          >
+            <PlainRowButton title="清理旧私有资源" onPress={cleanupLegacyPrivateResourcesAction} />
           </Section>
 
           <Section
