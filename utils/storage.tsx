@@ -366,6 +366,52 @@ async function listModuleFilesRecursive(dir: string): Promise<string[]> {
   return files
 }
 
+function parentDirectory(path: string): string {
+  const normalized = normalizePath(path)
+  const index = normalized.lastIndexOf("/")
+  return index > 0 ? normalized.slice(0, index) : ""
+}
+
+/**
+ * Read the new Surge/Module directory and the old selected-root location.
+ * Before the automatic Module-folder handling was added, modules could be
+ * written directly into iCloud/Surge. Keep that location visible so changing
+ * the storage rule never makes existing modules appear deleted.
+ */
+async function moduleSearchDirectories(primaryDir?: string): Promise<string[]> {
+  const primary = String(primaryDir ?? (await getModulesDirResolved())).trim()
+  if (!primary) return []
+
+  const directories: string[] = [primary]
+  const add = (value: string) => {
+    const normalized = normalizePath(value)
+    if (!normalized) return
+    if (!directories.some((item) => normalizePath(item) === normalized)) directories.push(normalized)
+  }
+
+  const surgeRoot = await getSurgeBookmarkRoot()
+  if (surgeRoot) {
+    add(surgeRoot)
+    const rootName = normalizePath(surgeRoot).split("/").pop()?.toLowerCase() ?? ""
+    if (rootName === "module" || rootName === "modules") add(parentDirectory(surgeRoot))
+  }
+
+  return directories
+}
+
+async function listModuleFilesFromSearchDirectories(primaryDir?: string): Promise<string[]> {
+  const files: string[] = []
+  for (const directory of await moduleSearchDirectories(primaryDir)) {
+    // File Provider can briefly report a false `exists` while the same
+    // security-scoped directory is readable. Let the directory read decide;
+    // a genuinely absent directory is simply skipped after the catch.
+    try {
+      files.push(...await listModuleFilesRecursive(directory))
+    } catch {}
+  }
+  return Array.from(new Set(files))
+}
+
 export async function loadModules(
   resolvedDir?: string,
   includeContent = false,
@@ -377,7 +423,7 @@ export async function loadModules(
   const dir = resolvedDir || await getModulesDirResolved()
 
   const modules: ModuleInfo[] = []
-  const files = await listModuleFilesRecursive(dir)
+  const files = await listModuleFilesFromSearchDirectories(dir)
   const prefixes = getLinkPrefixes()
   for (const path of files) {
     const item = await readModuleInfo(path, prefixes, includeContent)
@@ -636,15 +682,7 @@ export async function loadCategoriesFromModules(baseDir?: string): Promise<{
   added: number
 }> {
   const fm = fmOrThrow()
-  const primaryDir = await getModulesDirResolved(baseDir)
-  const altDir = baseDir ? Path.join(primaryDir, MODULES_DIR_NAME) : undefined
-  let files: string[] = []
-  if (await exists(primaryDir)) {
-    files = await listModuleFilesRecursive(primaryDir)
-  }
-  if (!files.length && altDir && (await exists(altDir))) {
-    files = await listModuleFilesRecursive(altDir)
-  }
+  const files = await listModuleFilesFromSearchDirectories(await getModulesDirResolved(baseDir))
   const set = new Set<string>()
   for (const path of files) {
     let text = ""
@@ -662,15 +700,7 @@ export async function loadCategoriesFromModules(baseDir?: string): Promise<{
 
 export async function renameCategoryInModules(oldName: string, newName: string, baseDir?: string): Promise<void> {
   const fm = fmOrThrow()
-  const primaryDir = await getModulesDirResolved(baseDir)
-  const altDir = baseDir ? Path.join(primaryDir, MODULES_DIR_NAME) : undefined
-  let files: string[] = []
-  if (await exists(primaryDir)) {
-    files = await listModuleFilesRecursive(primaryDir)
-  }
-  if (!files.length && altDir && (await exists(altDir))) {
-    files = await listModuleFilesRecursive(altDir)
-  }
+  const files = await listModuleFilesFromSearchDirectories(await getModulesDirResolved(baseDir))
   for (const path of files) {
     let text = ""
     try {
@@ -688,15 +718,7 @@ export async function renameCategoryInModules(oldName: string, newName: string, 
 
 export async function countModulesByCategory(baseDir?: string): Promise<Record<string, number>> {
   const fm = fmOrThrow()
-  const primaryDir = await getModulesDirResolved(baseDir)
-  const altDir = baseDir ? Path.join(primaryDir, MODULES_DIR_NAME) : undefined
-  let files: string[] = []
-  if (await exists(primaryDir)) {
-    files = await listModuleFilesRecursive(primaryDir)
-  }
-  if (!files.length && altDir && (await exists(altDir))) {
-    files = await listModuleFilesRecursive(altDir)
-  }
+  const files = await listModuleFilesFromSearchDirectories(await getModulesDirResolved(baseDir))
   const counts: Record<string, number> = {}
   for (const path of files) {
     let text = ""
