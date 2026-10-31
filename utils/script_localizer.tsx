@@ -464,6 +464,47 @@ async function rebaseExistingLocalResourcePaths(
   return rewriteModuleResourceReferences(content, references, replacements)
 }
 
+export type LocalResourcePathSyncResult = {
+  content: string
+  migratedCount: number
+  rollback: () => Promise<void>
+}
+
+/**
+ * Synchronize paths for resources that are already local without fetching any
+ * remote resource. This is intentionally separate from full localization so
+ * turning the download switch off does not prevent old root-level script
+ * references from being moved to `Script/<filename>`.
+ */
+export async function syncLocalModuleResourcePaths(
+  content: string,
+  _info: Pick<ModuleInfo, "name">,
+  modulePath: string,
+  resourceRoot?: string,
+): Promise<LocalResourcePathSyncResult> {
+  const changes: FileChange[] = []
+  const rootDir = String(resourceRoot ?? "").trim() || inferResourceRoot(modulePath)
+  try {
+    const rebasedContent = await rebaseExistingLocalResourcePaths(
+      content,
+      modulePath,
+      _info.name,
+      rootDir,
+      changes,
+    )
+    const localReferences = extractLocalModuleResourceReferences(rebasedContent)
+    if (localReferences.length) await verifyLocalResourcePaths(rebasedContent, rootDir)
+    return {
+      content: rebasedContent,
+      migratedCount: changes.length,
+      rollback: () => rollbackChanges(changes),
+    }
+  } catch (error) {
+    await rollbackChanges(changes)
+    throw new Error(`模块本地路径同步失败：${String((error as any)?.message ?? error)}`)
+  }
+}
+
 async function verifyLocalResourcePaths(
   content: string,
   resourceRoot: string,

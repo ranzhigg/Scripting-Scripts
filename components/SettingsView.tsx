@@ -521,7 +521,7 @@ export function SettingsView(props: {
             header={<Text>下载设置</Text>}
             footer={(
               <Text font="caption" foregroundStyle="secondaryLabel">
-                开启后，保存设置会同步现有远程模块：下载 [Script] 中的远程 script-path 到 iCloud Drive/Surge/Script，并把模块引用改成 Script/文件名；[Rule]/[Ruleset] 中的 RULE-SET 或 DOMAIN-SET，以及远程 #!include 继续写入 Surge 根目录。这个规则对所有模块和资源统一适用，模块文件本身不移动；转换链接只会优先读取当前已安装模块作为源，不参与文件命名。普通规则、重写目标和请求参数不会被改写；批量写入会串行执行且不会逐个强制重载 Surge。关闭并保存后会把现有远程模块切回远程引用，已有本地文件不会自动删除，仍可在模块菜单中单独执行“本地化脚本与规则集”。
+                开启后，保存设置会同步现有远程模块：下载 [Script] 中的远程 script-path 到 iCloud Drive/Surge/Script，并把模块引用改成 Script/文件名；[Rule]/[Ruleset] 中的 RULE-SET 或 DOMAIN-SET，以及远程 #!include 继续写入 Surge 根目录。这个规则对所有模块和资源统一适用，模块文件本身不移动；转换链接只会优先读取当前已安装模块作为源，不参与文件命名。普通规则、重写目标和请求参数不会被改写；批量写入会串行执行且不会逐个强制重载 Surge。即使关闭本地化，后续更新也会同步已有本地资源路径，但不会因此下载新的远程资源。关闭并保存后会把现有远程模块切回远程引用，已有本地文件不会自动删除，仍可在模块菜单中单独执行“本地化脚本与规则集”。
               </Text>
             )}
           >

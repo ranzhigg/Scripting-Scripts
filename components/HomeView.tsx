@@ -590,6 +590,7 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
       remoteModules,
       enabled ? "开启本地化：同步现有模块…" : "关闭本地化：切回远程引用…",
       sourceContents,
+      { preferInstalledConverterSources: enabled },
     )
   }
 
@@ -1054,7 +1055,7 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
         setStage(`资源已写入 Surge 配置目录：${result.localizedResources} 个`)
         await Dialog.alert({
           title: "已整理并本地化",
-          message: `已处理 ${result.localizedResources} 个远程资源，并写入 Surge 根目录；模块引用已改为根目录文件名。\n\n${surgeReloadMessage}\n例如：文件为 Surge/timecard.js，模块内应为 script-path=timecard.js。`,
+          message: `已处理 ${result.localizedResources} 个远程资源，并写入 Surge 配置目录；脚本写入 Script 子目录，模块引用已同步为 Script/文件名。\n\n${surgeReloadMessage}\n例如：文件为 Surge/Script/timecard.js，模块内应为 script-path=Script/timecard.js。`,
         })
       } else {
         setStage("模块没有可下载的远程资源")
@@ -1207,6 +1208,7 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
     list: ModuleInfo[],
     title: string,
     sourceContents?: Map<string, string>,
+    options: { preferInstalledConverterSources?: boolean } = {},
   ) {
     const downloadable = list.filter((m) => !!m.link)
     if (!downloadable.length) {
@@ -1230,7 +1232,9 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
       // changes that looks like a reload loop to Surge.
       const configuredConcurrency = Math.max(1, Math.min(cfg.downloadConcurrency || 3, total))
       const localizeEnabled = loadConfig().localizeScriptsOnDownload
-      const concurrency = sourceContents || localizeEnabled ? 1 : configuredConcurrency
+      const preferInstalledConverterSources = options.preferInstalledConverterSources ?? true
+      const hasLocalPathSync = downloadable.some((item) => item.localResources)
+      const concurrency = sourceContents || localizeEnabled || hasLocalPathSync ? 1 : configuredConcurrency
 
       const updateOverallProgress = () => {
         setStage(`下载中：已完成 ${completed}/${total}`)
@@ -1252,7 +1256,12 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
           // the installed module already has local resources, use its current
           // text first and only fall back to the URL if that text cannot be
           // read from the selected Surge bookmark.
-          if (sourceContent === undefined && localizeEnabled && isConverterModuleLink(m.link)) {
+          if (
+            sourceContent === undefined &&
+            preferInstalledConverterSources &&
+            isConverterModuleLink(m.link) &&
+            (localizeEnabled || m.localResources)
+          ) {
             sourceContent = await readInstalledModuleText(m)
           }
           const downloadInfo = { ...m, saveDir: inferSaveDir(m), linkPrefix }
@@ -1268,12 +1277,17 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
           // the installed module as the source and repair/localize it
           // offline. This is what makes Update All safe for boxjs and similar
           // Script-Hub-generated modules.
-          if (!res.ok && sourceContent === undefined && localizeEnabled) {
+          if (
+            !res.ok &&
+            sourceContent === undefined &&
+            preferInstalledConverterSources &&
+            (localizeEnabled || m.localResources)
+          ) {
             sourceContent = await readInstalledModuleText(m)
             if (sourceContent !== undefined) {
               const fallback = await downloadModule(
                 downloadInfo,
-                { content: sourceContent, localizeResources: true },
+                { content: sourceContent, localizeResources: localizeEnabled },
               )
               if (fallback.ok) res = fallback
             }

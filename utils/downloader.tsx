@@ -13,7 +13,7 @@ import { downloadWithProgress } from "./stream_downloader"
 import { validateSurgeModuleText } from "./module_validation"
 import { withTimeout } from "./async"
 import { backupModulePath } from "./backups"
-import { localizeModuleResources } from "./script_localizer"
+import { localizeModuleResources, syncLocalModuleResourcePaths } from "./script_localizer"
 
 export type DownloadModuleOptions = {
   mode?: "stream" | "direct"
@@ -185,13 +185,16 @@ async function writeFinalModule(
   const path = moduleFilePath(info.name, targetDir)
   const shouldLocalize = options.localizeResources ?? loadConfig().localizeScriptsOnDownload
   // Every write is guarded, even when resource localization is disabled. The
-  // guard returns the actual iCloud Drive/Surge root; local resources must be
-  // written there because Surge does not reliably discover nested paths.
+  // guard returns the actual iCloud Drive/Surge root; local scripts are
+  // normalized to its visible `Script` child and modules stay in `Module`.
   const surgeRoot = await requireSurgeProfileDir(targetDir)
+  const normalized = shouldLocalize
+    ? null
+    : await syncLocalModuleResourcePaths(preparedContent, info, path, surgeRoot)
   const localized = shouldLocalize
     ? await localizeModuleResources(preparedContent, info, path, surgeRoot)
     : null
-  const content = localized?.content ?? preparedContent
+  const content = localized?.content ?? normalized?.content ?? preparedContent
 
   try {
     await backupModulePath(path)
@@ -213,9 +216,13 @@ async function writeFinalModule(
       )
       if (saved !== content) throw new Error(`写入后校验失败：${path}`)
     }
-    return { path, localizedResources: localized?.localizedCount ?? 0 }
+    return {
+      path,
+      localizedResources: localized?.localizedCount ?? normalized?.migratedCount ?? 0,
+    }
   } catch (error) {
     if (localized) await localized.rollback()
+    else if (normalized) await normalized.rollback()
     throw error
   }
 }
@@ -243,10 +250,13 @@ export async function writeModuleText(
     const path = moduleFilePath(info.name, targetDir)
     const shouldLocalize = options.localizeResources ?? loadConfig().localizeScriptsOnDownload
     const surgeRoot = await requireSurgeProfileDir(targetDir)
+    const normalized = shouldLocalize
+      ? null
+      : await syncLocalModuleResourcePaths(preparedContent, info, path, surgeRoot)
     const localized = shouldLocalize
       ? await localizeModuleResources(preparedContent, info, path, surgeRoot)
       : null
-    const content = localized?.content ?? preparedContent
+    const content = localized?.content ?? normalized?.content ?? preparedContent
     try {
       await backupModulePath(path)
       await withTimeout(
@@ -264,9 +274,14 @@ export async function writeModuleText(
         )
         if (saved !== content) throw new Error(`写入后校验失败：${path}`)
       }
-      return { ok: true, path, localizedResources: localized?.localizedCount ?? 0 }
+      return {
+        ok: true,
+        path,
+        localizedResources: localized?.localizedCount ?? normalized?.migratedCount ?? 0,
+      }
     } catch (error) {
       if (localized) await localized.rollback()
+      else if (normalized) await normalized.rollback()
       throw error
     }
   } catch (e: any) {

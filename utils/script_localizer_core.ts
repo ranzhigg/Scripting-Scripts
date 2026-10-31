@@ -49,9 +49,8 @@ function isRemoteURL(value: string): boolean {
 
 function isLocalResourcePath(value: string): boolean {
   // `.scripting-resources` and `Scripts/...` are legacy layouts. The current
-  // layout deliberately uses a bare filename in the Surge root, because
-  // Surge resolves module resources from that root and does not reliably
-  // discover the nested iCloud paths used by earlier builds.
+  // layout uses `Script/<filename>` for JavaScript and a bare filename for
+  // rule sets/includes, all relative to the visible Surge profile root.
   const normalized = String(value ?? "").trim()
   if (!normalized) return false
   if (isRemoteURL(normalized)) return false
