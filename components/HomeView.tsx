@@ -36,7 +36,6 @@ import {
   listDirectSubDirs,
   saveLocalModule,
   getModulesDirResolved,
-  getSurgeBookmarkRoot,
   moveModuleFile,
 } from "../utils/storage"
 import { loadConfig, persistCategory, type AppConfig } from "../utils/config"
@@ -965,15 +964,13 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
     setBusy(true)
     setStage(`整理现有模块资源：${target.name}`)
     try {
-      const profileDir = await getSurgeBookmarkRoot()
-      if (!profileDir) throw new Error("Surge iCloud 书签根目录不可用，请在设置页重新选择")
-
       // Process the file that is actually in the Surge directory. This is
       // intentionally offline for already-localized modules: fetching
       // `#!url` again can return a converter response or a partial module and
       // would overwrite a valid local copy. The localizer rebases old
-      // `.scripting-resources/...` paths and downloads only still-remote
-      // resources found in the current file.
+      // profile-relative resource paths and downloads only still-remote
+      // resources found in the current file. For a module in Offline/, the
+      // resulting reference must retain that prefix.
       const fm: any = (globalThis as any).FileManager
       if (!fm?.readAsString) throw new Error("FileManager.readAsString 不可用")
       const content = String(await fm.readAsString(path) ?? "")
@@ -981,7 +978,7 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
         { ...target, saveDir: targetDir, filePath: path },
         targetDir,
         content,
-        { localizeResources: true, profileDir },
+        { localizeResources: true },
       )
       if (!result.ok) throw new Error(result.message ?? "模块资源本地化失败")
       await refreshModules()
@@ -990,7 +987,7 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
         setStage(`资源已写入 Surge 配置目录：${result.localizedResources} 个`)
         await Dialog.alert({
           title: "已整理并本地化",
-          message: `已处理 ${result.localizedResources} 个远程资源，并写入当前 Surge iCloud 模块目录。\n\n如果 Surge 仍显示 Invalid Local Resource，请确认模块文件和 .scripting-resources 位于同一 Surge 配置目录体系内。`,
+          message: `已处理 ${result.localizedResources} 个远程资源，并写入当前 Surge iCloud 模块目录。\n\n资源引用已按 Surge/Module 配置根目录生成；如果 Surge 仍显示 Invalid Local Resource，请确认模块文件和 .scripting-resources 位于同一 Surge 配置目录体系内。`,
         })
       } else {
         setStage("模块没有可下载的远程资源")

@@ -1,5 +1,17 @@
 # 更新日志
 
+## v4.2.13
+
+- 修正子目录模块的资源引用基准：Surge 的 `script-path`、`RULE-SET`、`DOMAIN-SET` 和 `#!include` 统一相对于 `Surge/Module` 配置根目录生成；例如 `Module/Offline/Demo.sgmodule` 使用 `Offline/.scripting-resources/...`，不再生成错误的 `Module/Offline/...` 或遗漏 `Offline/` 的短路径。
+- 本地化迁移同时兼容 v4.2.11、v4.2.12 已写入的两种错误路径，优先复用 `Surge/Module` 内已有资源，不重复下载。
+
+## v4.2.12
+
+- 修正 Surge 本地模块资源的解析边界：授权 `iCloud Drive/Surge` 只作为安全边界，模块实际写入 `Surge/Module`；资源文件跟随模块保存。
+- 兼容迁移 v4.2.11 已生成的 `Module/Offline/.scripting-resources/...` 等根目录路径；本地化时优先校正现有文件，不会因为路径修复重复生成模块。
+- 写入后校验本地资源文件是否真实可读；无法落盘时直接报出缺失资源，不再显示成功但 Surge 仍提示 `Invalid Local Resource`。
+- 设置、README、Script-Hub 写入、快捷指令和批量更新路径统一使用 `Surge/Module`，继续禁止写入 Scripting 私有目录。
+
 ## v4.2.11
 
 - 按 Surge 官方模块/脚本文档修正存储根目录：设置中选择的 `iCloud Drive/Surge` 配置目录就是实际写入目录，不再自动创建、猜测或回退到私有 `Module` 目录。

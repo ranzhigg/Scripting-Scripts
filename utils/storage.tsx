@@ -22,6 +22,7 @@ export type ModuleInfo = {
 
 const BASE_DIR_NAME = "SurgeModulesManager"
 const MODULES_DIR_NAME = "Modules"
+const SURGE_MODULE_DIR_NAME = "Module"
 const LEGACY_RESOURCE_DIR_NAME = ".scripting-resources"
 const BUILTIN_LINK_PREFIXES = ["#!url=", "#SUBSCRIBED"]
 
@@ -64,10 +65,24 @@ export function getBaseDir(): string {
 
 export function getModulesDir(): string {
   const cfg = loadConfig()
-  if (cfg.baseDir) return cfg.baseDir
+  if (cfg.baseDir) return surgeModuleDirectory(cfg.baseDir)
   // Do not silently fall back to Scripting's private documents directory.
   // Callers that write modules must surface the missing Surge bookmark.
   return ""
+}
+
+/**
+ * Resolve the real Surge module directory without confusing it with the
+ * selected bookmark boundary. The user selects `iCloud Drive/Surge`; Surge's
+ * local modules live in its `Module` child. Selecting that child directly is
+ * also accepted so an existing setup is not nested as `Module/Module`.
+ */
+function surgeModuleDirectory(root: string): string {
+  const normalized = normalizePath(root)
+  if (!normalized) return ""
+  const last = normalized.split("/").pop()?.toLowerCase() ?? ""
+  if (last === "module" || last === "modules") return normalized
+  return Path.join(normalized, SURGE_MODULE_DIR_NAME)
 }
 
 async function resolveBookmarkedPath(rawPath: string, bookmarkName?: string): Promise<string> {
@@ -118,14 +133,14 @@ export async function getModulesDirResolved(baseDir?: string): Promise<string> {
   if (!target) {
     if (!configured) return ""
     const resolved = await resolveBookmarkedPath(configured, bookmarkName)
-    if (resolved) return resolved
-    return bookmarkName ? "" : configured
+    if (resolved) return surgeModuleDirectory(resolved)
+    return bookmarkName ? "" : surgeModuleDirectory(configured)
   }
 
   if (configured && normalizePath(target) === normalizePath(configured)) {
     const resolved = await resolveBookmarkedPath(target, bookmarkName)
-    if (resolved) return resolved
-    return bookmarkName ? "" : target
+    if (resolved) return surgeModuleDirectory(resolved)
+    return bookmarkName ? "" : surgeModuleDirectory(target)
   }
   return target
 }
@@ -133,10 +148,11 @@ export async function getModulesDirResolved(baseDir?: string): Promise<string> {
 /**
  * Return the resolved iCloud/Surge profile directory selected by the user.
  *
- * Surge treats this directory as the profile root: local `.sgmodule` files
- * are read from it and relative script/ruleset paths are resolved from it.
- * Requiring both the configured path and bookmark name prevents a stale path
- * from silently falling back to Scripting's private documents directory.
+ * Return the selected iCloud/Surge bookmark boundary. This is deliberately
+ * separate from `getModulesDirResolved()`, which points at `Surge/Module`.
+ * Keeping the two paths separate lets us validate every write against the
+ * user's bookmark while generating resource paths relative to the directory
+ * that contains the module, which is how Surge loads local module resources.
  */
 export async function getSurgeBookmarkRoot(): Promise<string> {
   try {
@@ -203,13 +219,15 @@ async function ensureDir(dir: string): Promise<void> {
 export async function ensureStorage(): Promise<void> {
   const cfg = loadConfig()
   if (cfg.baseDir) {
-    const resolved = await getModulesDirResolved(cfg.baseDir)
-    if (!resolved) {
+    const root = await getSurgeBookmarkRoot()
+    if (!root) {
       throw new Error("书签路径不可用，请在设置页重新选择书签文件夹")
     }
-    // The selected iCloud/Surge folder is Surge's profile directory. Do not
-    // create a guessed child such as `Module`: Surge loads local .sgmodule
-    // files from the selected profile directory itself.
+    // The selected bookmark is the security boundary. Modules and their
+    // resources are written into its real `Module` child; never use Scripting's
+    // private documents directory as a fallback.
+    await ensureDir(root)
+    await ensureDir(surgeModuleDirectory(root))
     return
   }
   throw new Error("请先在设置中选择有效的 iCloud Drive/Surge 配置目录；不会回退到 Scripting 私有目录")

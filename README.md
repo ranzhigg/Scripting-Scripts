@@ -17,7 +17,7 @@ https://github.com/ranzhigg/Scripting-Scripts
 脚本启动后分为两个页面：
 
 - `模块管理`：管理、搜索、分类、刷新和写入 Surge 本地 `.sgmodule` 模块，支持备份、回滚、健康检查、批量选择与 ShareSheet 分享、快捷指令和可选 Surge HTTP 控制。
-- 模块资源本地化：设置页可选“下载时本地化脚本与规则集”。开启后，模块更新、Script-Hub 写入和本地文件导入会下载 `[Script]` 中的远程 `script-path`、`[Rule]`/`[Ruleset]` 中的 `RULE-SET`/`DOMAIN-SET`，以及远程 `#!include`，直接保存到已授权的 Surge 配置目录（例如 `Surge/.scripting-resources/<模块>/`），并写入相对于 Surge 配置根目录的本地路径；同一模块原位更新，不会额外生成第二个 `.sgmodule`，重复资源会复用稳定路径；关闭时仍可长按模块选择“本地化脚本与规则集”。
+- 模块资源本地化：设置页可选“下载时本地化脚本与规则集”。开启后，模块更新、Script-Hub 写入和本地文件导入会下载 `[Script]` 中的远程 `script-path`、`[Rule]`/`[Ruleset]` 中的 `RULE-SET`/`DOMAIN-SET`，以及远程 `#!include`，直接保存到 `Surge/Module` 下对应模块目录的 `.scripting-resources/<模块>/`，并写入相对于 Surge `Module` 配置根目录的本地路径；例如 `Module/Offline/Demo.sgmodule` 使用 `Offline/.scripting-resources/...`，根目录模块使用 `.scripting-resources/...`。同一模块原位更新，不会额外生成第二个 `.sgmodule`，重复资源会复用稳定路径；关闭时仍可长按模块选择“本地化脚本与规则集”。
 - `Script-Hub`：调用上游 Script-Hub 测试版完成格式识别与转换；本仓库只负责 UI、平台导入链接、结果复制和 Surge 本地写入。
 
 Script-Hub 页的目标平台会同步目标格式、扩展名和快速操作：
@@ -39,7 +39,7 @@ Scripting 在这里是原生模块导入入口，不是另一套代理配置格�
 
 - iOS/iPadOS 上安装 Scripting
 - Surge 已开启 iCloud，并能看到 `iCloud Drive/Surge` 文件夹
-- 首次运行后，在“设置”中选择实际的 iCloud Drive `Surge` 配置目录；该目录就是模块写入根目录，不会创建或回退到 Scripting 私有目录
+- 首次运行后，在“设置”中选择 iCloud Drive 的 `Surge` 文件夹；脚本会自动使用或创建其中的 `Module` 子目录，不会回退到 Scripting 私有目录
 - Script-Hub 转换需要启用 Script-Hub 测试版对应模块和重写
 - 使用 Shadowrocket 平台时需要安装 Shadowrocket；上游不支持的脚本触发器或专属语义会显示兼容性提示
 - Scripting 原生“模块导入”不需要脚本名；选择 Scripting 平台后会通过 `scripting://import_module?url=...` 拉起模块导入页
@@ -52,7 +52,7 @@ Scripting 在这里是原生模块导入入口，不是另一套代理配置格�
 
 1. 打开 Scripting 的“导入远程脚本”。
 2. 粘贴 `https://github.com/ranzhigg/Scripting-Scripts` 并导入。
-3. 打开脚本，在“设置”中选择实际的 iCloud Drive `Surge` 配置目录；选中的目录就是 `.sgmodule` 和本地资源的写入根目录。
+3. 打开脚本，在“设置”中选择 iCloud Drive 的 `Surge` 文件夹；`.sgmodule` 和本地资源会写入其中的 `Module` 子目录。
 4. 在项目标题的 Intent 设置中启用 `File URLs`、`URLs` 和 `Text`。
 
 ## 使用 Script-Hub 页面
@@ -62,7 +62,7 @@ Scripting 在这里是原生模块导入入口，不是另一套代理配置格�
 3. 点击“识别来源格式”，必要时在“格式”中手动修正。
 4. 按需展开“高级转换参数”配置请求头、筛选、脚本兼容和运行参数。
 5. 先在“格式与目标”中选择目标平台；目标格式和快速操作会自动同步。
-6. 目标为 Surge 模块时，点击“转换并写入”会直接写入设置中选定的 `iCloud Drive/Surge` 配置目录；也可以在结果页生成远程安装链接。
+6. 目标为 Surge 模块时，点击“转换并写入”会直接写入 `iCloud Drive/Surge/Module`；也可以在结果页生成远程安装链接。
 7. QX、Loon、Egern、Shadowrocket、Scripting 的可用目标会生成对应 URL Scheme；Scripting 可在 Surge 模块与 Loon 插件之间切换。不支持直接拉起的组合请复制转换结果交给客户端。
 
 不要打开转换链接后复制浏览器地址栏内容。浏览器地址栏中的链接可能未正确编码，复制后会导致参数异常。
@@ -73,7 +73,7 @@ Scripting 在这里是原生模块导入入口，不是另一套代理配置格�
 
 - 打开“模块管理”页面可刷新模块列表。
 - 远程模块可以单独更新，也可以批量更新；覆盖前会自动备份。
-- 远程脚本和规则集默认继续使用上游 URL。需要彻底本地化时，可在设置中开启“下载时本地化脚本与规则集”，或长按模块执行同名操作；资源会跟随模块写入 Surge 配置目录，模块内容保留原始 `#!url` 以便继续更新。旧版本若已显示 `Invalid Local Resource`，对该模块执行一次本地化会优先整理当前文件中的本地路径，不会盲目重新拉取并覆盖现有模块。
+- 远程脚本和规则集默认继续使用上游 URL。需要彻底本地化时，可在设置中开启“下载时本地化脚本与规则集”，或长按模块执行同名操作；资源会跟随模块写入 `Surge/Module` 下的对应目录，模块内容保留原始 `#!url` 以便继续更新。旧版本若已显示 `Invalid Local Resource`，对该模块执行一次本地化会把旧的 `Module/Offline/.scripting-resources/...` 或遗漏 `Offline/` 的短路径校正为相对于 `Surge/Module` 的正确路径，并在缺失时才下载资源。
 - 本地化有硬路径校验：只有解析成功的 Surge iCloud 书签目录允许写入资源；未选择、失效或越界时会拒绝操作，不会把资源落到 Scripting 私有目录。
 - 设置页提供“清理旧私有资源”，只删除旧版本生成的 `.scripting-resources`，不会删除模块、备份或配置；若旧目录与当前 Surge 书签重叠，会自动跳过。
 - 新增或首次导入的模块默认保持关闭；确认内容后再在 Surge 中手动启用。若已配置 Surge HTTP API，脚本会在写入后再次发送关闭状态，避免 iCloud 刷新时状态跳变。
@@ -84,24 +84,21 @@ Scripting 在这里是原生模块导入入口，不是另一套代理配置格�
 
 ### iCloud 目录结构与子目录
 
-资源始终写入已授权的 `iCloud Drive/Surge` 配置目录，不会落到 Scripting 私有目录，也不会自动创建一个替代性的 `Module` 目录。模块放在子目录时，资源物理上跟随模块整理，模块引用仍相对于选定的 Surge 配置根目录：
+资源始终写入已授权的 `iCloud Drive/Surge/Module`，不会落到 Scripting 私有目录。设置只需授权 `Surge` 根目录，`Module` 不存在时会自动创建；模块放在子目录时，资源也跟随模块整理：
 
 ```text
-Surge/
-├─ Demo.sgmodule
-├─ .scripting-resources/
-│  └─ Demo-<稳定标识>/
-│     ├─ scripts/
-│     ├─ rulesets/
-│     └─ includes/
+Module/
 ├─ Providers/
 │  ├─ Demo.sgmodule
 │  └─ .scripting-resources/
-│     └─ Demo-<稳定标识>/...
+│     └─ Demo-<稳定标识>/
+│        ├─ scripts/
+│        ├─ rulesets/
+│        └─ includes/
 └─ .surge-module-backups/
 ```
 
-模块内的 `script-path`、`RULE-SET`、`DOMAIN-SET` 和 `#!include` 会按 Surge 配置根目录改写。因此 `Providers/Demo.sgmodule` 内的资源会写在 `Providers/.scripting-resources/...`，引用会写成 `Providers/.scripting-resources/...`，这正是 Surge 解析本地资源所需的路径。普通规则、重写目标、图标和请求参数不会被误改。
+模块内的 `script-path`、`RULE-SET`、`DOMAIN-SET` 和 `#!include` 会按 Surge `Module` 配置根目录改写。因此 `Providers/Demo.sgmodule` 内的资源会写在 `Providers/.scripting-resources/...`，引用为 `Providers/.scripting-resources/...`；普通规则、重写目标、图标和请求参数不会被误改。
 
 ### 批量分享与导入
 

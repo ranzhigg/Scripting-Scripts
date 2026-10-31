@@ -76,10 +76,10 @@ if (rewriteRemoteModuleResources(kindSpecific, new Map()).includes("https://cdn.
   throw new Error("rewritten local paths unexpectedly became remote again")
 }
 
-const profileRoot = "/icloud/Surge/Modules"
-const nestedResource = "/icloud/Surge/Modules/Providers/Demo/.scripting-resources/Demo-aabbccdd/scripts/demo.js"
+const profileRoot = "/icloud/Surge/Module"
+const nestedResource = "/icloud/Surge/Module/Providers/Demo/.scripting-resources/Demo-aabbccdd/scripts/demo.js"
 if (relativeProfilePath(profileRoot, nestedResource) !== "Providers/Demo/.scripting-resources/Demo-aabbccdd/scripts/demo.js") {
-  throw new Error("nested iCloud module path was not kept relative to the Surge profile root")
+  throw new Error("nested iCloud module path was not kept relative to the Surge Module profile root")
 }
 
 const localSample = [
@@ -91,13 +91,13 @@ const localSample = [
 const localReferences = extractLocalModuleResourceReferences(localSample)
 if (localReferences.length !== 2) throw new Error(`expected 2 local resources, got ${localReferences.length}`)
 const rebased = rewriteModuleResourceReferences(localSample, localReferences, new Map([
-  ["script:.scripting-resources/demo/scripts/a.js", "Module/.scripting-resources/demo/scripts/a.js"],
-  ["ruleset:.scripting-resources/demo/rulesets/a.list", "Module/.scripting-resources/demo/rulesets/a.list"],
+  ["script:.scripting-resources/demo/scripts/a.js", "Offline/.scripting-resources/demo/scripts/a.js"],
+  ["ruleset:.scripting-resources/demo/rulesets/a.list", "Offline/.scripting-resources/demo/rulesets/a.list"],
 ]))
-if (!rebased.includes("script-path=Module/.scripting-resources/demo/scripts/a.js")) {
+if (!rebased.includes("script-path=Offline/.scripting-resources/demo/scripts/a.js")) {
   throw new Error("local script path was not rebased")
 }
-if (!rebased.includes("RULE-SET,Module/.scripting-resources/demo/rulesets/a.list,REJECT")) {
+if (!rebased.includes("RULE-SET,Offline/.scripting-resources/demo/rulesets/a.list,REJECT")) {
   throw new Error("local ruleset path was not rebased")
 }
 

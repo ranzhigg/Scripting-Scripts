@@ -196,7 +196,7 @@ export function SettingsView(props: {
       const idx = updated.findIndex((b) => b.name === bookmarkName)
       if (idx >= 0) setBookmarkIdx(idx)
       await refreshCounts(next)
-      await Dialog.alert({ message: "已保存 Surge 配置目录；模块会直接写入该目录" })
+      await Dialog.alert({ message: "已保存 Surge 文件夹；模块会写入其中的 Module 子目录" })
     } catch (e: any) {
       await Dialog.alert({ title: "选择文件夹失败", message: String(e?.message ?? e) })
     }
@@ -457,7 +457,7 @@ export function SettingsView(props: {
               textFieldStyle="roundedBorder"
             />
             <Text font="caption" foregroundStyle="secondaryLabel">
-              请选择 iCloud Drive 的 Surge 配置目录；模块会直接写入该目录，子目录也会被扫描
+              请选择 iCloud Drive 的 Surge 文件夹；模块会自动使用或创建其中的 Module 子目录，子目录也会被扫描
             </Text>
             {bookmarks.length ? (
               <Picker
@@ -521,7 +521,7 @@ export function SettingsView(props: {
             header={<Text>下载设置</Text>}
             footer={(
               <Text font="caption" foregroundStyle="secondaryLabel">
-                开启后，更新或导入模块时会下载 [Script] 中的远程 script-path、[Rule]/[Ruleset] 中的 RULE-SET 或 DOMAIN-SET，以及远程 #!include，保存到模块目录的 .scripting-resources 文件夹，并把引用改成本地相对路径。普通规则、重写目标和请求参数不会被改写；关闭后仍可在模块菜单中单独执行“本地化脚本与规则集”。
+                开启后，更新或导入模块时会下载 [Script] 中的远程 script-path、[Rule]/[Ruleset] 中的 RULE-SET 或 DOMAIN-SET，以及远程 #!include，保存到模块目录的 .scripting-resources 文件夹，并按 Surge/Module 配置根目录生成本地相对路径（例如 Offline/.scripting-resources/...）。普通规则、重写目标和请求参数不会被改写；关闭后仍可在模块菜单中单独执行“本地化脚本与规则集”。
               </Text>
             )}
           >
@@ -552,7 +552,7 @@ export function SettingsView(props: {
                     if (!root) {
                       await Dialog.alert({
                         title: "无法开启本地化",
-                        message: "请先选择有效的 iCloud/Surge 配置目录。资源会直接写入该目录，不会写入 Scripting 私有目录。",
+                        message: "请先选择有效的 iCloud/Surge 书签文件夹。模块和资源会写入其中的 Module 子目录，不会写入 Scripting 私有目录。",
                       })
                       return
                     }

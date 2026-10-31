@@ -7,8 +7,6 @@ import {
   ensureStorage,
   type ModuleInfo,
   getModulesDirResolved,
-  getSurgeBookmarkRoot,
-  isPathWithin,
   requireSurgeProfileDir,
 } from "./storage"
 import { downloadWithProgress } from "./stream_downloader"
@@ -25,26 +23,10 @@ export type DownloadModuleOptions = {
   localizeResources?: boolean
   /** Preserve local-file import semantics and metadata. */
   isLocal?: boolean
-  /** Resolved iCloud/Surge bookmark root used to validate local writes. */
-  profileDir?: string
 }
 
 const FETCH_TIMEOUT_MS = 30 * 1000
 const FILE_OPERATION_TIMEOUT_MS = 15 * 1000
-
-async function requireSurgeProfileRoot(profileDir: string | undefined, targetDir: string): Promise<string> {
-  const modulesRoot = await getSurgeBookmarkRoot()
-  if (!modulesRoot) {
-    throw new Error("模块必须写入已授权的 iCloud Drive/Surge 配置目录，请先在设置中选择有效的 Surge 书签文件夹")
-  }
-  if (profileDir && !isPathWithin(modulesRoot, profileDir)) {
-    throw new Error("本地化资源根目录不在 iCloud/Surge 书签范围内，请重新选择 Surge 文件夹")
-  }
-  if (!isPathWithin(modulesRoot, targetDir)) {
-    throw new Error("模块目标目录不在 iCloud Drive/Surge 书签内，已拒绝写入")
-  }
-  return modulesRoot
-}
 
 async function writeString(fm: any, path: string, content: string): Promise<void> {
   const writer = typeof fm?.writeAsString === "function"
@@ -197,17 +179,18 @@ async function writeFinalModule(
   info: ModuleInfo & { linkPrefix?: string },
   targetDir: string,
   rawText: string,
-  options: Pick<DownloadModuleOptions, "localizeResources" | "profileDir"> = {},
+  options: Pick<DownloadModuleOptions, "localizeResources"> = {},
 ): Promise<{ path: string; localizedResources: number }> {
   const preparedContent = prepareModuleText(rawText, info)
   const path = moduleFilePath(info.name, targetDir)
   const shouldLocalize = (options.localizeResources ?? loadConfig().localizeScriptsOnDownload) || !!info.localResources || !!info.localScripts
-  // Every write is guarded, even when resource localization is disabled. This
-  // prevents a missing/stale bookmark from silently sending a module to
-  // Scripting's private documents directory.
-  const profileDir = shouldLocalize
-    ? await requireSurgeProfileRoot(options.profileDir, targetDir)
-    : await requireSurgeProfileRoot(options.profileDir ?? (await getModulesDirResolved()), targetDir)
+  // Every write is guarded, even when resource localization is disabled. The
+  // resolved `Surge/Module` directory is the relative-path root for Surge
+  // local resources; do not use the outer `Surge` bookmark root or the
+  // module's optional subdirectory here.
+  await requireSurgeProfileDir(targetDir)
+  const profileDir = await getModulesDirResolved()
+  if (!profileDir) throw new Error("Surge Module 配置目录不可用，无法定位本地资源路径")
   const localized = shouldLocalize
     ? await localizeModuleResources(preparedContent, info, path, profileDir)
     : null
@@ -249,7 +232,7 @@ export async function writeModuleText(
   info: ModuleInfo & { linkPrefix?: string },
   targetDir: string,
   rawText: string,
-  options: Pick<DownloadModuleOptions, "localizeResources" | "isLocal" | "profileDir"> = {},
+  options: Pick<DownloadModuleOptions, "localizeResources" | "isLocal"> = {},
 ): Promise<{ ok: boolean; message?: string; path?: string; localizedResources?: number }> {
   const fm: any = (globalThis as any).FileManager
   if (!fm?.writeAsString) return { ok: false, message: "FileManager.writeAsString 不可用" }
@@ -262,9 +245,9 @@ export async function writeModuleText(
       : validateSurgeModuleText(rawText)
     const path = moduleFilePath(info.name, targetDir)
     const shouldLocalize = (options.localizeResources ?? loadConfig().localizeScriptsOnDownload) || !!info.localResources || !!info.localScripts
-    const profileDir = shouldLocalize
-      ? await requireSurgeProfileRoot(options.profileDir, targetDir)
-      : await requireSurgeProfileRoot(options.profileDir ?? (await getModulesDirResolved()), targetDir)
+    await requireSurgeProfileDir(targetDir)
+    const profileDir = await getModulesDirResolved()
+    if (!profileDir) throw new Error("Surge Module 配置目录不可用，无法定位本地资源路径")
     const localized = shouldLocalize
       ? await localizeModuleResources(preparedContent, info, path, profileDir)
       : null
@@ -301,7 +284,7 @@ async function downloadModuleDirect(
   info: ModuleInfo & { linkPrefix?: string },
   targetDir: string,
   sourceContent?: string,
-  options: Pick<DownloadModuleOptions, "localizeResources" | "profileDir"> = {},
+  options: Pick<DownloadModuleOptions, "localizeResources"> = {},
 ): Promise<{ path: string; localizedResources: number }> {
   const text = sourceContent ?? await fetchModuleText(info.link)
   return writeFinalModule(fm, info, targetDir, text, options)
@@ -312,7 +295,7 @@ async function downloadModuleStream(
   info: ModuleInfo & { linkPrefix?: string },
   targetDir: string,
   sourceContent?: string,
-  options: Pick<DownloadModuleOptions, "localizeResources" | "profileDir"> = {},
+  options: Pick<DownloadModuleOptions, "localizeResources"> = {},
 ): Promise<{ path: string; localizedResources: number }> {
   if (sourceContent !== undefined) {
     return writeFinalModule(fm, info, targetDir, sourceContent, options)
@@ -360,19 +343,17 @@ export async function downloadModule(
   const targetDir = info.saveDir ?? (await getModulesDirResolved())
   // Validate before fetching. A failed/stale bookmark must never cause a
   // network request followed by a write into the Scripting private folder.
-  const profileDir = await requireSurgeProfileDir(targetDir)
+  await requireSurgeProfileDir(targetDir)
   const localizeResources = (options.localizeResources ?? loadConfig().localizeScriptsOnDownload) || !!info.localResources || !!info.localScripts
   try {
     let result: { path: string; localizedResources: number }
     if (options.mode === "direct") {
       result = await downloadModuleDirect(fm, info, targetDir, options.content, {
         localizeResources,
-        profileDir,
       })
     } else {
       result = await downloadModuleStream(fm, info, targetDir, options.content, {
         localizeResources,
-        profileDir,
       })
     }
     return { ok: true, path: result.path, localizedResources: result.localizedResources }
