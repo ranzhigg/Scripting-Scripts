@@ -17,7 +17,7 @@ https://github.com/ranzhigg/Scripting-Scripts
 脚本启动后分为两个页面：
 
 - `模块管理`：管理、搜索、分类、刷新和写入 Surge 本地 `.sgmodule` 模块，支持备份、回滚、健康检查、批量选择与 ShareSheet 分享、快捷指令和可选 Surge HTTP 控制。
-- 模块资源本地化：设置页可选“下载时本地化脚本与规则集”。开启并保存后，现有模块、后续更新、Script-Hub 写入和本地文件导入会下载 `[Script]` 中的远程 `script-path`、`[Rule]`/`[Ruleset]` 中的 `RULE-SET`/`DOMAIN-SET`，以及远程 `#!include`，直接保存到 `iCloud Drive/Surge` 根目录，并在模块中写入与远程一致的文件名；例如 `Module/Offline/Demo.sgmodule` 使用 `script-path=timecard.js`，实际文件为 `Surge/timecard.js`。关闭并保存后现有远程模块会切回远程引用，已有本地文件不会自动删除。旧版本的隐藏 `.scripting-resources`、`Scripts/...` 和哈希文件名会在手动本地化时自动迁移。
+- 模块资源本地化：设置页可选“下载时本地化脚本与规则集”。开启并保存后，脚本会直接读取 Surge 中现有的模块正文，再处理 `[Script]` 中的远程 `script-path`、`[Rule]`/`[Ruleset]` 中的 `RULE-SET`/`DOMAIN-SET`，以及远程 `#!include`，避免把 boxjs、Script-Hub 这类转换地址误当成普通模块重新下载。资源直接保存到 `iCloud Drive/Surge` 根目录，并在模块中写入与远程一致的文件名；例如 `Module/Offline/Demo.sgmodule` 使用 `script-path=timecard.js`，实际文件为 `Surge/timecard.js`。关闭并保存后现有远程模块会切回远程引用，已有本地文件不会自动删除。旧版本的隐藏 `.scripting-resources`、`Scripts/...` 和哈希文件名会在手动本地化时自动迁移。
 - `Script-Hub`：调用上游 Script-Hub 测试版完成格式识别与转换；本仓库只负责 UI、平台导入链接、结果复制和 Surge 本地写入。
 
 Script-Hub 页的目标平台会同步目标格式、扩展名和快速操作：
@@ -76,7 +76,7 @@ Scripting 在这里是原生模块导入入口，不是另一套代理配置格�
 - 远程脚本和规则集默认继续使用上游 URL。需要彻底本地化时，可在设置中开启“下载时本地化脚本与规则集”，或长按模块执行同名操作；资源会写入 `Surge` 根目录，模块内容保留原始 `#!url` 以便继续更新。旧版本若已显示 `Invalid Local Resource`，对该模块执行一次本地化会把隐藏目录、`Scripts/...` 或带哈希文件名的旧资源迁移到根目录，并改写为 `timecard.js` 这样的裸文件名。
 - 本地化有硬路径校验：只有解析成功的 Surge iCloud 书签目录允许写入资源；未选择、失效或越界时会拒绝操作，不会把资源落到 Scripting 私有目录。
 - 设置页提供“清理旧私有资源”，只删除旧版本生成的 `.scripting-resources`，不会删除模块、备份或配置；若旧目录与当前 Surge 书签重叠，会自动跳过。
-- 新增或首次导入的模块默认保持关闭；确认内容后再在 Surge 中手动启用。若已配置 Surge HTTP API，脚本会在写入后再次发送关闭状态，避免 iCloud 刷新时状态跳变。
+- 新增或首次导入的模块默认保持关闭；确认内容后再在 Surge 中手动启用。批量本地化不会逐个关闭/开启现有模块，避免短时间连续触发 Surge 配置重载；如果当前 Surge 版本没有立即识别文件变化，完成后手动重新启用对应模块即可。
 - 长按模块可预览更新、编辑、复制链接、查看内容、回滚或删除。
 - 添加模块时可以填写自定义分类，分类会以单条 `#!category=...` 元数据持久化写入模块；更新、备份恢复、批量导入和 iCloud 元数据同步都会沿用该分类，不需要重复手动设置。
 - `.sgmodule` 文件可通过“文件”分享 → Scripting → 本脚本直接写入。

@@ -551,6 +551,10 @@ export async function localizeModuleResources(
 
     const localizedContent = upsertLocalResourcesTag(rewriteRemoteModuleResources(rebasedContent, replacements))
     await verifyLocalResourcePaths(localizedContent, rootDir)
+    const remainingRemoteReferences = extractRemoteModuleResourceReferences(localizedContent)
+    if (remainingRemoteReferences.length) {
+      throw new Error(`模块仍包含 ${remainingRemoteReferences.length} 个远程资源引用，已拒绝写入`)
+    }
     return {
       content: localizedContent,
       localizedCount: uniqueResources.length,

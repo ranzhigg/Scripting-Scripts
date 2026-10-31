@@ -552,10 +552,19 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
       if (fm?.readAsString) {
         const cached = new Map<string, string>()
         for (const item of remoteModules) {
-          if (!item.localResources || !item.filePath) continue
+          // Localize the module that is actually installed. Do not fetch the
+          // `#!url` again: converter links such as boxjs/script.hub may return
+          // a script or a transient response instead of a Surge module.
+          if (!item.filePath) continue
           try {
-            cached.set(moduleKey(item), String(await fm.readAsString(item.filePath) ?? ""))
-          } catch {}
+            const content = String(await fm.readAsString(item.filePath) ?? "")
+            // Keep an empty value in the map as well. Its presence tells
+            // downloadBatch to fail locally instead of falling back to the
+            // remote `#!url` when a bookmarked file cannot be read.
+            cached.set(moduleKey(item), content)
+          } catch {
+            cached.set(moduleKey(item), "")
+          }
         }
         if (cached.size) sourceContents = cached
       }
@@ -1195,13 +1204,15 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
     const errors: string[] = []
     let okCount = 0
     let localizedResourceCount = 0
-    const updatedRemoteNames: string[] = []
-    let surgeReloadedCount = 0
     try {
       const total = downloadable.length
       let nextIndex = 0
       let completed = 0
-      const concurrency = Math.max(1, Math.min(cfg.downloadConcurrency || 3, total))
+      // A localization batch rewrites several files that Surge watches. Keep
+      // those writes serial so iCloud does not deliver a burst of profile
+      // changes that looks like a reload loop to Surge.
+      const configuredConcurrency = Math.max(1, Math.min(cfg.downloadConcurrency || 3, total))
+      const concurrency = sourceContents ? 1 : configuredConcurrency
 
       const updateOverallProgress = () => {
         setStage(`下载中：已完成 ${completed}/${total}`)
@@ -1228,7 +1239,6 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
           if (res.ok) {
             okCount += 1
             localizedResourceCount += res.localizedResources ?? 0
-            updatedRemoteNames.push(getModuleRemoteName(m))
             recordRecentImport(m)
           }
           else errors.push(`${m.name}: ${res.message ?? "下载失败"}`)
@@ -1241,19 +1251,16 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
       const workers = Array.from({ length: concurrency }, () => worker())
       await Promise.all(workers)
 
-      // iCloud file writes do not necessarily invalidate Surge's in-memory
-      // module text. Re-read every updated module that was already enabled;
-      // disabled modules remain disabled and are left untouched.
-      for (const remoteName of Array.from(new Set(updatedRemoteNames))) {
-        try {
-          if (await refreshEnabledRemoteModule(loadConfig(), remoteName)) surgeReloadedCount += 1
-        } catch {}
-      }
+      // Do not toggle every updated module here. Each disable/enable pair is a
+      // full Surge configuration reload; doing that for a batch can trigger
+      // Surge's "configuration reloaded too frequently" guard. iCloud will
+      // deliver the changed module files, and a user can manually re-enable a
+      // module once if the current Surge build does not notice the change.
 
       if (errors.length) {
         const details = errors.join("\n")
         setLastFailureDetails(details)
-        setStage(`下载完成：成功 ${okCount}/${total}${surgeReloadedCount ? `；Surge 已刷新 ${surgeReloadedCount} 个模块` : ""}`)
+        setStage(`下载完成：成功 ${okCount}/${total}`)
         await Dialog.alert({
           title: "部分下载失败",
           message: `${errors.slice(0, 8).join("\n")}${errors.length > 8 ? `\n其余 ${errors.length - 8} 个失败已省略` : ""}\n\n可在状态区域复制完整失败详情。`,
@@ -1263,7 +1270,7 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
         setStage(
           `${localizedResourceCount
             ? `下载完成：${okCount}/${total}（模块资源本地化 ${localizedResourceCount} 个）`
-            : `下载完成：${okCount}/${total}`}${surgeReloadedCount ? `；Surge 已刷新 ${surgeReloadedCount} 个模块` : "；请在 Surge 中重新启用已更新模块以加载新路径"}`,
+            : `下载完成：${okCount}/${total}`}；如 Surge 未立即识别新路径，请手动重新启用对应模块。`,
         )
       }
       if (okCount > 0) {
