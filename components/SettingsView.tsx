@@ -484,7 +484,14 @@ export function SettingsView(props: {
             />
           </Section>
 
-          <Section header={<Text>下载设置</Text>}>
+          <Section
+            header={<Text>下载设置</Text>}
+            footer={(
+              <Text font="caption" foregroundStyle="secondaryLabel">
+                开启后，更新或导入模块时会下载 [Script] 中的远程 script-path、[Rule]/[Ruleset] 中的 RULE-SET 或 DOMAIN-SET，以及远程 #!include，保存到模块目录的 .scripting-resources 文件夹，并把引用改成本地相对路径。普通规则、重写目标和请求参数不会被改写；关闭后仍可在模块菜单中单独执行“本地化脚本与规则集”。
+              </Text>
+            )}
+          >
             <Picker
               title={"并发下载数"}
               pickerStyle="menu"
@@ -501,6 +508,14 @@ export function SettingsView(props: {
                 </Text>
               ))}
             </Picker>
+            <Toggle
+              title="下载时本地化脚本与规则集"
+              value={cfg.localizeScriptsOnDownload}
+              onChanged={(value: boolean) => {
+                HapticFeedback.heavyImpact()
+                setCfg((c) => ({ ...c, localizeScriptsOnDownload: value }))
+              }}
+            />
           </Section>
 
           <Section

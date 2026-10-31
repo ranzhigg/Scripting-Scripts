@@ -13,6 +13,10 @@ export type ModuleInfo = {
   filePath?: string
   saveDir?: string
   isLocal?: boolean
+  /** Legacy marker: the module's remote [Script] references were localized. */
+  localScripts?: boolean
+  /** The module's remote scripts, rule sets, and includes have been localized. */
+  localResources?: boolean
   content?: string
 }
 
@@ -299,6 +303,16 @@ async function readModuleInfo(
   const link = parseLinkFromContent(text, prefixes)
   const sourceURL = parseTag(text, "source-url")
   const localTag = parseTag(text, "local")
+  const localScriptsTag = parseTag(text, "local-scripts")
+  const hasLocalScripts =
+    localScriptsTag != null &&
+    String(localScriptsTag).trim() !== "" &&
+    !["0", "false", "no"].includes(String(localScriptsTag).trim().toLowerCase())
+  const localResourcesTag = parseTag(text, "local-resources")
+  const hasLocalResources =
+    localResourcesTag != null &&
+    String(localResourcesTag).trim() !== "" &&
+    !["0", "false", "no"].includes(String(localResourcesTag).trim().toLowerCase())
   const hasLocalTag =
     localTag != null &&
     String(localTag).trim() !== "" &&
@@ -316,6 +330,8 @@ async function readModuleInfo(
     icon,
     filePath: path,
     isLocal,
+    localScripts: hasLocalScripts,
+    localResources: hasLocalResources || hasLocalScripts,
     ...(includeContent ? { content: text } : {}),
   }
 }
@@ -402,13 +418,23 @@ export async function renameModuleFile(oldTarget: ModuleInfo | string, newName: 
 
 function upsertTag(content: string, key: string, value?: string): string {
   const trimmed = String(value ?? "").trim()
-  if (!trimmed) {
-    return content.replace(new RegExp(`^\\s*#!\\s*${key}\\s*=.*\\n?`, "im"), "")
-  }
   const line = `#!${key}=${trimmed}`
   const re = new RegExp(`^\\s*#!\\s*${key}\\s*=.*$`, "im")
-  if (re.test(content)) return content.replace(re, line)
-  return `${line}\n${content}`
+  const lines = String(content ?? "").split(/\r?\n/g)
+  let inserted = false
+  const next: string[] = []
+  for (const item of lines) {
+    if (re.test(item)) {
+      if (trimmed && !inserted) {
+        next.push(line)
+        inserted = true
+      }
+      continue
+    }
+    next.push(item)
+  }
+  if (trimmed && !inserted) next.unshift(line)
+  return next.join("\n")
 }
 
 function upsertLink(content: string, prefixes: string[], value?: string): string {
@@ -428,7 +454,14 @@ function upsertLink(content: string, prefixes: string[], value?: string): string
 
 export async function updateModuleMetadata(
   target: ModuleInfo | string,
-  info: { link?: string; sourceURL?: string; category?: string; icon?: string; local?: boolean }
+  info: {
+    link?: string
+    sourceURL?: string
+    category?: string
+    icon?: string
+    local?: boolean
+    localScripts?: boolean
+  }
 ) {
   const fm = fmOrThrow()
   const path = resolveModulePath(target)
@@ -439,12 +472,19 @@ export async function updateModuleMetadata(
   if (Object.prototype.hasOwnProperty.call(info, "sourceURL")) {
     content = upsertTag(content, "source-url", info.sourceURL)
   }
-  content = upsertTag(content, "category", info.category)
+  // Omitted/undefined category means “keep the category already persisted in
+  // the module”. Pass an empty string when the caller intentionally clears it.
+  if (Object.prototype.hasOwnProperty.call(info, "category") && info.category !== undefined) {
+    content = upsertTag(content, "category", info.category)
+  }
   if (info.icon !== undefined) {
     content = upsertTag(content, "icon", info.icon)
   }
   if (info.local !== undefined) {
     content = upsertTag(content, "local", info.local ? "true" : "")
+  }
+  if (info.localScripts !== undefined) {
+    content = upsertTag(content, "local-scripts", info.localScripts ? "true" : "")
   }
   await backupModulePath(path)
   await fm.writeAsString(path, content)
@@ -459,8 +499,8 @@ export async function saveLocalModule(info: ModuleInfo, rawContent: string): Pro
   const path = moduleFilePath(info.name, targetDir)
   let content = String(rawContent ?? "")
   content = upsertTag(content, "local", "true")
-  content = upsertTag(content, "source-url", info.sourceURL)
-  content = upsertTag(content, "category", info.category)
+  if (info.sourceURL !== undefined) content = upsertTag(content, "source-url", info.sourceURL)
+  if (info.category !== undefined) content = upsertTag(content, "category", info.category)
   await backupModulePath(path)
   await fm.writeAsString(path, content)
 }

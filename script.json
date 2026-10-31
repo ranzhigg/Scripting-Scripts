@@ -5,7 +5,7 @@
     "autoUpdateInterval": null
   },
   "name": "Surge模块管理",
-  "description": "Surge 模块管理：在“模块管理”页面管理、分类、刷新和写入 Surge .sgmodule 模块；在 Script-Hub 页面使用上游 Script-Hub 测试版转换核心。支持远程链接、本地文本、格式识别、模块名/文件名/分类/User-Agent/请求头/高级参数、预览、Quantumult X/Loon/Surge/Egern/Shadowrocket/Scripting 平台导入，以及 Surge 模块一键写入。Scripting 原生模块导入支持 .sgmodule 和 .plugin，不作为独立代理配置格式；Shadowrocket 支持模块快速导入，规则集在无法直接拉起时复制结果。\n\n脚本启动后分为“模块管理”和“Script-Hub”两页，不内置在线模块市场，不维护第三方站点列表，也不会自动扫描或分发第三方内容。转换时会按用户操作把来源内容和参数发送到 Script-Hub 测试版，请勿填写敏感凭据。\n\n快捷指令：可用 Scripting 的“运行脚本”调用本脚本来更新模块，也可以把多个 Surge .sgmodule 通过系统分享面板交给本脚本或快捷指令批量导入。参数示例：不传参数或传 all 更新全部远程模块；传分类名更新指定分类；传 JSON 更新指定分类、目录或模块名。\n\n注意：需要先在设置页选择有效书签文件夹；如果书签权限失效，快捷指令会返回书签路径不可用提示。",
+  "description": "Surge 模块管理：在“模块管理”页面管理、分类、刷新和写入 Surge .sgmodule 模块；在 Script-Hub 页面使用上游 Script-Hub 测试版转换核心。支持远程链接、本地文本、格式识别、模块名/文件名/分类/User-Agent/请求头/高级参数、预览、Quantumult X/Loon/Surge/Egern/Shadowrocket/Scripting 平台导入，以及 Surge 模块一键写入。可选下载并本地化 [Script]、RULE-SET、DOMAIN-SET 和 #!include 中的远程资源，保持模块、脚本和规则集一起离线可用。Scripting 原生模块导入支持 .sgmodule 和 .plugin，不作为独立代理配置格式；Shadowrocket 支持模块快速导入，规则集在无法直接拉起时复制结果。\n\n脚本启动后分为“模块管理”和“Script-Hub”两页，不内置在线模块市场，不维护第三方站点列表，也不会自动扫描或分发第三方内容。转换时会按用户操作把来源内容和参数发送到 Script-Hub 测试版，请勿填写敏感凭据。\n\n快捷指令：可用 Scripting 的“运行脚本”调用本脚本来更新模块，也可以把多个 Surge .sgmodule 通过系统分享面板交给本脚本或快捷指令批量导入。参数示例：不传参数或传 all 更新全部远程模块；传分类名更新指定分类；传 JSON 更新指定分类、目录或模块名。\n\n注意：需要先在设置页选择有效书签文件夹；如果书签权限失效，快捷指令会返回书签路径不可用提示。",
   "localizedNames": {
     "de": "",
     "ja": "",
@@ -26,12 +26,12 @@
     "URLs"
   ],
   "localizedDescriptions": {
-    "en": "Manage, categorize, refresh, and write Surge .sgmodule files in the Scripting tab. The Script-Hub tab uses the upstream Script-Hub beta conversion core, accepts remote URLs or local text, supports Quantumult X, Loon, Surge, Egern, Shadowrocket, and native Scripting module import, exposes advanced conversion parameters, and builds client import links. Native Scripting import accepts Surge .sgmodule and Loon .plugin files; Scripting is an import entry, not a separate proxy format. Shadowrocket modules can use the native import link, while rule-set results are copied when no direct import scheme is available.\n\nThe app has no bundled online market, third-party site list, automatic crawler, or redistributed third-party content. Conversion input and selected parameters are sent to Script-Hub beta only when the user performs a conversion action; do not enter sensitive credentials.\n\nShortcuts can run this script from Scripting to update all modules, a category, or selected names. Multiple local .sgmodule files can also be shared to this script or a Shortcut for batch import; each file is written and verified separately. A valid Surge iCloud bookmark folder must be selected in Settings.",
+    "en": "Manage, categorize, refresh, and write Surge .sgmodule files in the Scripting tab. The Script-Hub tab uses the upstream Script-Hub beta conversion core, accepts remote URLs or local text, supports Quantumult X, Loon, Surge, Egern, Shadowrocket, and native Scripting module import, exposes advanced conversion parameters, and builds client import links. An optional setting downloads remote [Script] script-path, RULE-SET, DOMAIN-SET, and #!include resources beside the module and rewrites them to local relative paths, so the module, scripts, and rule sets can be used offline. Native Scripting import accepts Surge .sgmodule and Loon .plugin files; Scripting is an import entry, not a separate proxy format. Shadowrocket modules can use the native import link, while rule-set results are copied when no direct import scheme is available.\n\nThe app has no bundled online market, third-party site list, automatic crawler, or redistributed third-party content. Conversion input and selected parameters are sent to Script-Hub beta only when the user performs a conversion action; do not enter sensitive credentials.\n\nShortcuts can run this script from Scripting to update all modules, a category, or selected names. Multiple local .sgmodule files can also be shared to this script or a Shortcut for batch import; each file is written and verified separately. A valid Surge iCloud bookmark folder must be selected in Settings.",
     "ru": "",
     "pt": "",
     "fr": "",
     "de": "",
-    "zh": "Surge 模块管理：在“模块管理”页面管理、分类、刷新和写入 Surge .sgmodule 模块；在 Script-Hub 页面使用上游 Script-Hub 测试版转换核心。支持远程链接、本地文本、格式识别、模块名/文件名/分类/User-Agent/请求头/高级参数、预览、Quantumult X/Loon/Surge/Egern/Shadowrocket/Scripting 平台导入，以及 Surge 模块一键写入。Scripting 原生模块导入支持 .sgmodule 和 .plugin，不作为独立代理配置格式；Shadowrocket 支持模块快速导入，规则集在无法直接拉起时复制结果。\n\n脚本启动后分为“模块管理”和“Script-Hub”两页，不内置在线模块市场，不维护第三方站点列表，也不会自动扫描或分发第三方内容。转换时会按用户操作把来源内容和参数发送到 Script-Hub 测试版，请勿填写敏感凭据。快捷指令可更新全部远程模块、指定分类或指定名称；也可将多个本地 .sgmodule 通过分享面板交给本脚本或快捷指令批量导入，每个文件都会单独写入并回读校验。",
+    "zh": "Surge 模块管理：在“模块管理”页面管理、分类、刷新和写入 Surge .sgmodule 模块；在 Script-Hub 页面使用上游 Script-Hub 测试版转换核心。支持远程链接、本地文本、格式识别、模块名/文件名/分类/User-Agent/请求头/高级参数、预览、Quantumult X/Loon/Surge/Egern/Shadowrocket/Scripting 平台导入，以及 Surge 模块一键写入。可选下载并本地化 [Script]、RULE-SET、DOMAIN-SET 和 #!include 中的远程资源，模块、脚本和规则集可一起离线使用。Scripting 原生模块导入支持 .sgmodule 和 .plugin，不作为独立代理配置格式；Shadowrocket 支持模块快速导入，规则集在无法直接拉起时复制结果。\n\n脚本启动后分为“模块管理”和“Script-Hub”两页，不内置在线模块市场，不维护第三方站点列表，也不会自动扫描或分发第三方内容。转换时会按用户操作把来源内容和参数发送到 Script-Hub 测试版，请勿填写敏感凭据。快捷指令可更新全部远程模块、指定分类或指定名称；也可将多个本地 .sgmodule 通过分享面板交给本脚本或快捷指令批量导入，每个文件都会单独写入并回读校验。",
     "ja": "",
     "it": "",
     "es": ""
@@ -43,5 +43,5 @@
     "name": "ranzhigg",
     "homepage": "https://github.com/ranzhigg"
   },
-  "version": "4.2.4"
+  "version": "4.2.5"
 }

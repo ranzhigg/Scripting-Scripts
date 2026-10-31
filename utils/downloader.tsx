@@ -1,4 +1,5 @@
 import { Path } from "scripting"
+import { loadConfig } from "./config"
 import {
   formatLinkLine,
   getLinkPrefixes,
@@ -11,11 +12,18 @@ import { downloadWithProgress } from "./stream_downloader"
 import { validateSurgeModuleText } from "./module_validation"
 import { withTimeout } from "./async"
 import { backupModulePath } from "./backups"
+import { localizeModuleResources } from "./script_localizer"
 
 export type DownloadModuleOptions = {
   mode?: "stream" | "direct"
   /** Raw remote text already fetched by the update preview flow. */
   content?: string
+  /** Override the global setting for this one write. */
+  localizeResources?: boolean
+  /** Preserve local-file import semantics and metadata. */
+  isLocal?: boolean
+  /** Resolved Surge profile root used for relative module-resource references. */
+  profileDir?: string
 }
 
 const FETCH_TIMEOUT_MS = 30 * 1000
@@ -43,24 +51,54 @@ function injectNameFlag(content: string): string {
   return content.replace(/#!\s*name\s*=/i, "#!name=🔗")
 }
 
+function upsertMetadataLine(content: string, key: string, value?: string): string {
+  const trimmed = String(value ?? "").trim()
+  const line = `#!${key}=${trimmed}`
+  const re = new RegExp(`^\\s*#!\\s*${key}\\s*=.*$`, "i")
+  const lines = String(content ?? "").split(/\r?\n/g)
+  let inserted = false
+  const next: string[] = []
+  for (const item of lines) {
+    if (re.test(item)) {
+      if (trimmed && !inserted) {
+        next.push(line)
+        inserted = true
+      }
+      continue
+    }
+    next.push(item)
+  }
+  if (trimmed && !inserted) next.unshift(line)
+  return next.join("\n")
+}
+
 function injectCategory(content: string, category?: string): string {
   const cat = String(category ?? "").trim()
+  // An absent category means “keep the source module's own category”. This
+  // matters for Script-Hub output that already carries its native category.
   if (!cat) return content
-  const line = `#!category=${cat}`
-  if (/^\s*#!\s*category\s*=.*$/im.test(content)) {
-    return content.replace(/^\s*#!\s*category\s*=.*$/im, line)
-  }
-  return `${line}\n${content}`
+  return upsertMetadataLine(content, "category", cat)
 }
 
 function injectSourceURL(content: string, sourceURL?: string): string {
   const value = String(sourceURL ?? "").trim()
   if (!value) return content
-  const line = `#!source-url=${value}`
-  if (/^\s*#!\s*source-url\s*=.*$/im.test(content)) {
-    return content.replace(/^\s*#!\s*source-url\s*=.*$/im, line)
-  }
-  return `${line}\n${content}`
+  return upsertMetadataLine(content, "source-url", value)
+}
+
+function injectLocalFlag(content: string): string {
+  return upsertMetadataLine(content, "local", "true")
+}
+
+function prepareLocalModuleText(
+  rawText: string,
+  info: ModuleInfo & { linkPrefix?: string },
+): string {
+  let content = validateSurgeModuleText(rawText)
+  content = injectLocalFlag(content)
+  content = injectCategory(content, info.category)
+  content = injectSourceURL(content, info.sourceURL)
+  return content
 }
 
 function prepareModuleText(
@@ -141,31 +179,48 @@ async function writeFinalModule(
   fm: any,
   info: ModuleInfo & { linkPrefix?: string },
   targetDir: string,
-  rawText: string
-): Promise<string> {
-  const content = prepareModuleText(rawText, info)
-
+  rawText: string,
+  options: Pick<DownloadModuleOptions, "localizeResources" | "profileDir"> = {},
+): Promise<{ path: string; localizedResources: number }> {
+  const preparedContent = prepareModuleText(rawText, info)
   const path = moduleFilePath(info.name, targetDir)
-  await backupModulePath(path)
-  await withTimeout(
-    () => writeString(fm, path, content),
-    FILE_OPERATION_TIMEOUT_MS,
-    `写入模块超时（${FILE_OPERATION_TIMEOUT_MS / 1000}s）：${path}`,
-  )
-  // File-provider bookmarks may accept a write request before the provider
-  // has actually committed it. Read the file back when supported so an
-  // import cannot report success while nothing reached Surge's directory.
-  if (typeof fm.readAsString === "function") {
-    const saved = String(
-      await withTimeout(
-        () => fm.readAsString(path),
-        FILE_OPERATION_TIMEOUT_MS,
-        `写入校验超时（${FILE_OPERATION_TIMEOUT_MS / 1000}s）：${path}`,
-      ),
+  const shouldLocalize = (options.localizeResources ?? loadConfig().localizeScriptsOnDownload) || !!info.localResources || !!info.localScripts
+  // Surge resolves local module resources from the selected profile/bookmark
+  // root, not from whichever subdirectory happens to contain this module.
+  // Keep the module in its chosen subdirectory, but calculate references from
+  // the resolved iCloud Surge root so `subdir/.scripting-resources/...` is
+  // written into the same bookmark and remains valid after a refresh.
+  const profileDir = options.profileDir ?? ((await getModulesDirResolved()) || targetDir)
+  const localized = shouldLocalize
+    ? await localizeModuleResources(preparedContent, info, path, profileDir)
+    : null
+  const content = localized?.content ?? preparedContent
+
+  try {
+    await backupModulePath(path)
+    await withTimeout(
+      () => writeString(fm, path, content),
+      FILE_OPERATION_TIMEOUT_MS,
+      `写入模块超时（${FILE_OPERATION_TIMEOUT_MS / 1000}s）：${path}`,
     )
-    if (saved !== content) throw new Error(`写入后校验失败：${path}`)
+    // File-provider bookmarks may accept a write request before the provider
+    // has actually committed it. Read the file back when supported so an
+    // import cannot report success while nothing reached Surge's directory.
+    if (typeof fm.readAsString === "function") {
+      const saved = String(
+        await withTimeout(
+          () => fm.readAsString(path),
+          FILE_OPERATION_TIMEOUT_MS,
+          `写入校验超时（${FILE_OPERATION_TIMEOUT_MS / 1000}s）：${path}`,
+        ),
+      )
+      if (saved !== content) throw new Error(`写入后校验失败：${path}`)
+    }
+    return { path, localizedResources: localized?.localizedCount ?? 0 }
+  } catch (error) {
+    if (localized) await localized.rollback()
+    throw error
   }
-  return path
 }
 
 /**
@@ -177,32 +232,46 @@ export async function writeModuleText(
   info: ModuleInfo & { linkPrefix?: string },
   targetDir: string,
   rawText: string,
-): Promise<{ ok: boolean; message?: string; path?: string }> {
+  options: Pick<DownloadModuleOptions, "localizeResources" | "isLocal" | "profileDir"> = {},
+): Promise<{ ok: boolean; message?: string; path?: string; localizedResources?: number }> {
   const fm: any = (globalThis as any).FileManager
   if (!fm?.writeAsString) return { ok: false, message: "FileManager.writeAsString 不可用" }
   try {
-    // A file shared from Files is already the converted module. Keep it
-    // byte-for-byte as text: do not inject a remote URL/name marker that
-    // belongs to the URL-download path.
-    const content = validateSurgeModuleText(rawText)
+    // A file shared from Files is already the converted module. Keep its
+    // metadata byte-for-byte unless the optional script-localization switch is
+    // enabled; that switch only rewrites recognized remote module resources.
+    const preparedContent = options.isLocal
+      ? prepareLocalModuleText(rawText, info)
+      : validateSurgeModuleText(rawText)
     const path = moduleFilePath(info.name, targetDir)
-    await backupModulePath(path)
-    await withTimeout(
-      () => writeString(fm, path, content),
-      FILE_OPERATION_TIMEOUT_MS,
-      `写入本地模块超时（${FILE_OPERATION_TIMEOUT_MS / 1000}s）：${path}`,
-    )
-    if (typeof fm.readAsString === "function") {
-      const saved = String(
-        await withTimeout(
-          () => fm.readAsString(path),
-          FILE_OPERATION_TIMEOUT_MS,
-          `本地模块校验超时（${FILE_OPERATION_TIMEOUT_MS / 1000}s）：${path}`,
-        ),
+    const shouldLocalize = (options.localizeResources ?? loadConfig().localizeScriptsOnDownload) || !!info.localResources || !!info.localScripts
+    const profileDir = options.profileDir ?? ((await getModulesDirResolved()) || targetDir)
+    const localized = shouldLocalize
+      ? await localizeModuleResources(preparedContent, info, path, profileDir)
+      : null
+    const content = localized?.content ?? preparedContent
+    try {
+      await backupModulePath(path)
+      await withTimeout(
+        () => writeString(fm, path, content),
+        FILE_OPERATION_TIMEOUT_MS,
+        `写入本地模块超时（${FILE_OPERATION_TIMEOUT_MS / 1000}s）：${path}`,
       )
-      if (saved !== content) throw new Error(`写入后校验失败：${path}`)
+      if (typeof fm.readAsString === "function") {
+        const saved = String(
+          await withTimeout(
+            () => fm.readAsString(path),
+            FILE_OPERATION_TIMEOUT_MS,
+            `本地模块校验超时（${FILE_OPERATION_TIMEOUT_MS / 1000}s）：${path}`,
+          ),
+        )
+        if (saved !== content) throw new Error(`写入后校验失败：${path}`)
+      }
+      return { ok: true, path, localizedResources: localized?.localizedCount ?? 0 }
+    } catch (error) {
+      if (localized) await localized.rollback()
+      throw error
     }
-    return { ok: true, path }
   } catch (e: any) {
     return { ok: false, message: String(e?.message ?? e) }
   }
@@ -213,9 +282,10 @@ async function downloadModuleDirect(
   info: ModuleInfo & { linkPrefix?: string },
   targetDir: string,
   sourceContent?: string,
-): Promise<string> {
+  options: Pick<DownloadModuleOptions, "localizeResources" | "profileDir"> = {},
+): Promise<{ path: string; localizedResources: number }> {
   const text = sourceContent ?? await fetchModuleText(info.link)
-  return writeFinalModule(fm, info, targetDir, text)
+  return writeFinalModule(fm, info, targetDir, text, options)
 }
 
 async function downloadModuleStream(
@@ -223,9 +293,10 @@ async function downloadModuleStream(
   info: ModuleInfo & { linkPrefix?: string },
   targetDir: string,
   sourceContent?: string,
-): Promise<string> {
+  options: Pick<DownloadModuleOptions, "localizeResources" | "profileDir"> = {},
+): Promise<{ path: string; localizedResources: number }> {
   if (sourceContent !== undefined) {
-    return writeFinalModule(fm, info, targetDir, sourceContent)
+    return writeFinalModule(fm, info, targetDir, sourceContent, options)
   }
   const tmpDir = fm.temporaryDirectory ?? Path.join(Path.dirname(moduleFilePath(info.name, targetDir)), ".tmp")
   const tmpPath = Path.join(tmpDir, `${info.name}_${Date.now()}.tmp`)
@@ -244,7 +315,7 @@ async function downloadModuleStream(
   }
 
   try {
-    return await writeFinalModule(fm, info, targetDir, text)
+    return await writeFinalModule(fm, info, targetDir, text, options)
   } finally {
     try {
       if (typeof fm.remove === "function") await fm.remove(tmpPath)
@@ -256,7 +327,7 @@ async function downloadModuleStream(
 export async function downloadModule(
   info: ModuleInfo & { linkPrefix?: string },
   options: DownloadModuleOptions = {}
-): Promise<{ ok: boolean; message?: string; path?: string }> {
+): Promise<{ ok: boolean; message?: string; path?: string; localizedResources?: number }> {
   await ensureStorage()
 
   const fm: any = (globalThis as any).FileManager
@@ -268,14 +339,22 @@ export async function downloadModule(
   }
 
   const targetDir = info.saveDir ?? (await getModulesDirResolved())
+  const profileDir = options.profileDir ?? await getModulesDirResolved()
+  const localizeResources = (options.localizeResources ?? loadConfig().localizeScriptsOnDownload) || !!info.localResources || !!info.localScripts
   try {
-    let path: string
+    let result: { path: string; localizedResources: number }
     if (options.mode === "direct") {
-      path = await downloadModuleDirect(fm, info, targetDir, options.content)
+      result = await downloadModuleDirect(fm, info, targetDir, options.content, {
+        localizeResources,
+        profileDir,
+      })
     } else {
-      path = await downloadModuleStream(fm, info, targetDir, options.content)
+      result = await downloadModuleStream(fm, info, targetDir, options.content, {
+        localizeResources,
+        profileDir,
+      })
     }
-    return { ok: true, path }
+    return { ok: true, path: result.path, localizedResources: result.localizedResources }
   } catch (e: any) {
     return { ok: false, message: String(e?.message ?? e) }
   }

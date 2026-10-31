@@ -17,6 +17,7 @@ https://github.com/ranzhigg/Scripting-Scripts
 脚本启动后分为两个页面：
 
 - `模块管理`：管理、搜索、分类、刷新和写入 Surge 本地 `.sgmodule` 模块，支持备份、回滚、健康检查、批量选择与 ShareSheet 分享、快捷指令和可选 Surge HTTP 控制。
+- 模块资源本地化：设置页可选“下载时本地化脚本与规则集”。开启后，模块更新、Script-Hub 写入和本地文件导入会下载 `[Script]` 中的远程 `script-path`、`[Rule]`/`[Ruleset]` 中的 `RULE-SET`/`DOMAIN-SET`，以及远程 `#!include`，保存到 Surge iCloud 书签中模块所在子目录的 `.scripting-resources/<模块>/`，并按书签根目录改写为本地相对路径；同一模块原位更新，不会额外生成第二个 `.sgmodule`，重复资源会复用稳定路径；关闭时仍可长按单个模块选择“本地化脚本与规则集”。
 - `Script-Hub`：调用上游 Script-Hub 测试版完成格式识别与转换；本仓库只负责 UI、平台导入链接、结果复制和 Surge 本地写入。
 
 Script-Hub 页的目标平台会同步目标格式、扩展名和快速操作：
@@ -72,11 +73,30 @@ Scripting 在这里是原生模块导入入口，不是另一套代理配置格�
 
 - 打开“模块管理”页面可刷新模块列表。
 - 远程模块可以单独更新，也可以批量更新；覆盖前会自动备份。
+- 远程脚本和规则集默认继续使用上游 URL。需要彻底本地化时，可在设置中开启“下载时本地化脚本与规则集”，或长按模块执行同名操作；资源会跟随模块写入 Surge iCloud 的对应子目录，模块内容保留原始 `#!url` 以便继续更新。
 - 新增或首次导入的模块默认保持关闭；确认内容后再在 Surge 中手动启用。若已配置 Surge HTTP API，脚本会在写入后再次发送关闭状态，避免 iCloud 刷新时状态跳变。
 - 长按模块可预览更新、编辑、复制链接、查看内容、回滚或删除。
-- 添加模块时可以填写自定义分类，分类会立即持久化。
+- 添加模块时可以填写自定义分类，分类会以单条 `#!category=...` 元数据持久化写入模块；更新、备份恢复、批量导入和 iCloud 元数据同步都会沿用该分类，不需要重复手动设置。
 - `.sgmodule` 文件可通过“文件”分享 → Scripting → 本脚本直接写入。
 - 模块写入后会重新读取目标文件，避免只提示成功但实际没有落盘。
+
+### iCloud 目录结构与子目录
+
+资源始终写入已授权的 Surge iCloud 模块书签，不会落到 Scripting 私有目录。模块放在子目录时，资源也跟随模块整理：
+
+```text
+Modules/
+├─ Providers/
+│  ├─ Demo.sgmodule
+│  └─ .scripting-resources/
+│     └─ Demo-<稳定标识>/
+│        ├─ scripts/
+│        ├─ rulesets/
+│        └─ includes/
+└─ .surge-module-backups/
+```
+
+Surge 的 `script-path`、`RULE-SET`、`DOMAIN-SET` 和 `#!include` 都按 profile 根目录解析。因此 `Providers/Demo.sgmodule` 内的引用会同步写成 `Providers/.scripting-resources/...`，不会只写 `.scripting-resources/...` 导致子目录模块找不到资源。普通规则、重写目标、图标和请求参数不会被误改。
 
 ### 批量分享与导入
 
@@ -117,6 +137,14 @@ Scripting 在这里是原生模块导入入口，不是另一套代理配置格�
 ### 只想导入本地文件
 
 直接使用“文件”分享 → Scripting → 本脚本，不需要经过 Script-Hub 网络转换；多选文件时会逐个写入 Surge 目录。
+
+### 模块资源本地化失败或想恢复远程资源
+
+本地化只处理 `[Script]` 中的远程 `script-path`、`[Rule]`/`[Ruleset]` 中的远程 `RULE-SET`/`DOMAIN-SET` 和远程 `#!include`，不会改写普通规则、重写目标、图标或请求参数。下载失败时不会写入新的模块内容，并会回滚本次已经写入的资源；模块更新前的版本仍在自动备份中，可通过“回滚版本”恢复。关闭开关不会自动删除已经下载的资源，避免误删；确认不再需要后可在 Surge 模块目录中删除 `.scripting-resources`。
+
+### 分类丢失、重复导入或出现重复模块
+
+分类不是只保存在 Scripting 配置里，而是写进模块正文的 `#!category=分类名`。同名模块导入会写回同一目标文件，已有模块的本地化操作也只更新原文件；重复执行时会去重 `#!category`、`#!local` 和本地化标记，不会追加第二个模块。若手动移动模块文件，请同时移动其对应的 `.scripting-resources/<模块>/` 目录，保持模块内的 profile 相对路径与目录层级一致。
 
 ## 社区贡献
 

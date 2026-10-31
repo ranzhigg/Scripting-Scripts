@@ -39,7 +39,7 @@ import {
   moveModuleFile,
 } from "../utils/storage"
 import { loadConfig, persistCategory, type AppConfig } from "../utils/config"
-import { downloadModule, previewModuleUpdate, type ModuleUpdatePreview } from "../utils/downloader"
+import { downloadModule, previewModuleUpdate, writeModuleText, type ModuleUpdatePreview } from "../utils/downloader"
 import { EditModuleView } from "./EditModuleView"
 import { RemoteControlView } from "./RemoteControlView"
 import { SettingsView } from "./SettingsView"
@@ -815,10 +815,16 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
       let addedModule: ModuleInfo | undefined
       if (info.isLocal) {
         setStage(`保存模块：${info.name}`)
-        await saveLocalModule(info, info.content ?? "")
-        addedModule = info
-        recordRecentImport(info)
-        setStage("添加完成（已保存）")
+        const result = await writeModuleText(
+          info,
+          info.saveDir ?? (await getModulesDirResolved()),
+          info.content ?? "",
+          { isLocal: true },
+        )
+        if (!result.ok) throw new Error(result.message ?? "本地模块写入失败")
+        addedModule = await loadModuleAtPath(result.path ?? moduleFilePath(info.name, info.saveDir)) ?? info
+        recordRecentImport(addedModule)
+        setStage(result.localizedResources ? `添加完成（模块资源已本地化 ${result.localizedResources} 个）` : "添加完成（已保存）")
       } else {
         setStage(`下载模块：${info.name}`)
         const res = await downloadModule(info)
@@ -907,7 +913,7 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
         await updateModuleMetadata({ ...merged, name: finalName, filePath: finalFilePath }, {
           link: merged.link,
           sourceURL: merged.sourceURL,
-          category: merged.category,
+          category: merged.category ?? "",
           local: false,
         })
       }
@@ -943,6 +949,49 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
       }
     } catch (e: any) {
       await Dialog.alert({ message: String(e?.message ?? e) })
+    }
+  }
+
+  async function localizeResourcesFor(target: ModuleInfo) {
+    const path = target.filePath ?? moduleFilePath(target.name, inferSaveDir(target))
+    const targetDir = inferSaveDir(target) ?? (await getModulesDirResolved())
+    if (!targetDir) {
+      await Dialog.alert({ message: "书签路径不可用，请在设置页重新选择 Surge 模块目录" })
+      return
+    }
+    setBusy(true)
+    setStage(`本地化模块资源：${target.name}`)
+    try {
+      const fm: any = (globalThis as any).FileManager
+      if (!fm?.readAsString) throw new Error("FileManager.readAsString 不可用")
+      const profileDir = await getModulesDirResolved()
+      if (!profileDir) throw new Error("Surge iCloud 书签根目录不可用，请在设置页重新选择")
+      const content = String(await fm.readAsString(path) ?? "")
+      const result = await writeModuleText(
+        { ...target, saveDir: targetDir, filePath: path },
+        targetDir,
+        content,
+        { localizeResources: true, profileDir },
+      )
+      if (!result.ok) throw new Error(result.message ?? "模块资源本地化失败")
+      await refreshModules()
+      await syncMetadataIfNeeded()
+      if (result.localizedResources) {
+        setStage(`模块资源已本地化：${result.localizedResources} 个`)
+        await Dialog.alert({
+          title: "模块资源已本地化",
+          message: `已下载并写入 ${result.localizedResources} 个远程资源，模块中的远程引用已改为本地相对路径。`,
+        })
+      } else {
+        setStage("没有发现远程资源")
+        await Dialog.alert({ message: "这个模块中没有发现 HTTP(S) 远程脚本、规则集或 include。" })
+      }
+    } catch (e: any) {
+      const message = String(e?.message ?? e)
+      setStage(`模块资源本地化失败：${message}`)
+      await Dialog.alert({ title: "模块资源本地化失败", message })
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -1095,6 +1144,7 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
     setLastFailureDetails("")
     const errors: string[] = []
     let okCount = 0
+    let localizedResourceCount = 0
     try {
       const total = downloadable.length
       let nextIndex = 0
@@ -1123,6 +1173,7 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
           )
           if (res.ok) {
             okCount += 1
+            localizedResourceCount += res.localizedResources ?? 0
             recordRecentImport(m)
           }
           else errors.push(`${m.name}: ${res.message ?? "下载失败"}`)
@@ -1145,7 +1196,11 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
         })
       } else {
         setLastFailureDetails("")
-        setStage(`下载完成：${okCount}/${total}`)
+        setStage(
+          localizedResourceCount
+            ? `下载完成：${okCount}/${total}（模块资源本地化 ${localizedResourceCount} 个）`
+            : `下载完成：${okCount}/${total}`,
+        )
       }
       if (okCount > 0) {
         await syncMetadataIfNeeded()
@@ -1647,6 +1702,7 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
                           {m.link ? (
                             <Button title="预览更新" action={withButtonHaptic(() => previewModuleFor(m))} />
                           ) : null}
+                          <Button title="本地化脚本与规则集" action={withButtonHaptic(() => localizeResourcesFor(m))} />
                           <Button title="查看模块" action={withButtonHaptic(() => viewModuleContent(m))} />
                           <Button title="回滚版本" action={withButtonHaptic(() => restoreModuleFor(m))} />
                           <Button title="复制链接" action={withButtonHaptic(() => copyModuleLink(m))} />
@@ -1684,7 +1740,7 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
                       <VStack alignment="leading" spacing={3}>
                         <Text font="headline">{m.name}</Text>
                         <Text font="caption" foregroundStyle="secondaryLabel">
-                          {m.category ? `${m.category} · ` : ""}{m.link ? "远程模块" : "本地模块"}
+                          {m.category ? `${m.category} · ` : ""}{m.link ? "远程模块" : "本地模块"}{m.localResources ? " · 资源已本地化" : ""}
                         </Text>
                       </VStack>
                       <Spacer />

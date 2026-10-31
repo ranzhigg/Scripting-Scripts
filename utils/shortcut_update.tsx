@@ -461,6 +461,7 @@ async function runLocalFileImport(
           },
           baseDir,
           String(content ?? ""),
+          { isLocal: true },
         ),
         IMPORT_TOTAL_TIMEOUT_MS,
         `本地模块写入超时（${IMPORT_TOTAL_TIMEOUT_MS / 1000}s）：${targetPath}`,

@@ -4,6 +4,8 @@ export type AppConfig = {
   categories: string[]
   linkPatternsText: string
   downloadConcurrency: number
+  /** Download remote module resources beside the local module. */
+  localizeScriptsOnDownload: boolean
   iCloudMetadataSync: boolean
   remoteHost: string
   remotePort: string
@@ -18,6 +20,7 @@ const DEFAULT_CONFIG: AppConfig = {
   categories: [],
   linkPatternsText: "#!url=",
   downloadConcurrency: 3,
+  localizeScriptsOnDownload: false,
   iCloudMetadataSync: false,
   remoteHost: "http://127.0.0.1",
   remotePort: "6171",
@@ -60,6 +63,7 @@ export function loadConfig(): AppConfig {
     const baseBookmarkName = String(obj?.baseBookmarkName ?? "").trim()
     const linkPatternsText = String(obj?.linkPatternsText ?? DEFAULT_CONFIG.linkPatternsText)
     const downloadConcurrency = normalizeDownloadConcurrency(obj?.downloadConcurrency)
+    const localizeScriptsOnDownload = !!obj?.localizeScriptsOnDownload
     const iCloudMetadataSync = !!obj?.iCloudMetadataSync
     const remoteHost = String(obj?.remoteHost ?? DEFAULT_CONFIG.remoteHost).trim() || DEFAULT_CONFIG.remoteHost
     const remotePort = String(obj?.remotePort ?? DEFAULT_CONFIG.remotePort).trim() || DEFAULT_CONFIG.remotePort
@@ -72,6 +76,7 @@ export function loadConfig(): AppConfig {
       baseBookmarkName,
       linkPatternsText,
       downloadConcurrency,
+      localizeScriptsOnDownload,
       iCloudMetadataSync,
       remoteHost,
       remotePort,
@@ -90,6 +95,7 @@ export function saveConfig(cfg: AppConfig): void {
     categories: normalizeCategories(cfg.categories ?? []),
     linkPatternsText: String(cfg.linkPatternsText ?? DEFAULT_CONFIG.linkPatternsText),
     downloadConcurrency: normalizeDownloadConcurrency(cfg.downloadConcurrency),
+    localizeScriptsOnDownload: !!cfg.localizeScriptsOnDownload,
     iCloudMetadataSync: !!cfg.iCloudMetadataSync,
     remoteHost: String(cfg.remoteHost ?? DEFAULT_CONFIG.remoteHost).trim() || DEFAULT_CONFIG.remoteHost,
     remotePort: String(cfg.remotePort ?? DEFAULT_CONFIG.remotePort).trim() || DEFAULT_CONFIG.remotePort,
