@@ -121,3 +121,31 @@ export async function disableNewModuleByDefault(
     return false
   }
 }
+
+/**
+ * Force Surge to reread a module from its iCloud file after Scripting rewrites
+ * it. The HTTP API exposes module enable/disable rather than a separate
+ * reload endpoint, so only an already-enabled module is toggled and it is
+ * restored to the same enabled state. Disabled modules are left untouched.
+ */
+export async function refreshEnabledRemoteModule(
+  cfg: AppConfig,
+  moduleName: string,
+): Promise<boolean> {
+  const name = String(moduleName ?? "").trim()
+  if (!name || !getRemoteBaseURL(cfg) || !String(cfg.remotePassword ?? "").trim()) return false
+
+  const enabled = await fetchEnabledModuleNames(cfg)
+  if (!enabled.has(name)) return false
+
+  await setRemoteModuleEnabled(cfg, name, false)
+  try {
+    await setRemoteModuleEnabled(cfg, name, true)
+  } catch (error) {
+    // A transient API failure after the disable must not leave a previously
+    // enabled module silently off; make one best-effort recovery attempt.
+    try { await setRemoteModuleEnabled(cfg, name, true) } catch {}
+    throw error
+  }
+  return true
+}

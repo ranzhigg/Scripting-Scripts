@@ -17,7 +17,7 @@ https://github.com/ranzhigg/Scripting-Scripts
 脚本启动后分为两个页面：
 
 - `模块管理`：管理、搜索、分类、刷新和写入 Surge 本地 `.sgmodule` 模块，支持备份、回滚、健康检查、批量选择与 ShareSheet 分享、快捷指令和可选 Surge HTTP 控制。
-- 模块资源本地化：设置页可选“下载时本地化脚本与规则集”。开启后，模块更新、Script-Hub 写入和本地文件导入会下载 `[Script]` 中的远程 `script-path`、`[Rule]`/`[Ruleset]` 中的 `RULE-SET`/`DOMAIN-SET`，以及远程 `#!include`，直接保存到 `Surge/Module` 下对应模块目录的可见 `Scripts/<模块>/`，并写入相对于 Surge `Module` 配置根目录的本地路径；例如 `Module/Offline/Demo.sgmodule` 使用 `Offline/Scripts/...`，根目录模块使用 `Scripts/...`。同一模块原位更新，不会额外生成第二个 `.sgmodule`，重复资源会复用稳定路径；关闭时仍可长按模块选择“本地化脚本与规则集”。旧版本的隐藏 `.scripting-resources` 会在本地化时自动迁移到可见目录。
+- 模块资源本地化：设置页可选“下载时本地化脚本与规则集”。开启并保存后，现有模块、后续更新、Script-Hub 写入和本地文件导入会下载 `[Script]` 中的远程 `script-path`、`[Rule]`/`[Ruleset]` 中的 `RULE-SET`/`DOMAIN-SET`，以及远程 `#!include`，直接保存到 `iCloud Drive/Surge` 根目录，并在模块中写入与远程一致的文件名；例如 `Module/Offline/Demo.sgmodule` 使用 `script-path=timecard.js`，实际文件为 `Surge/timecard.js`。关闭并保存后现有远程模块会切回远程引用，已有本地文件不会自动删除。旧版本的隐藏 `.scripting-resources`、`Scripts/...` 和哈希文件名会在手动本地化时自动迁移。
 - `Script-Hub`：调用上游 Script-Hub 测试版完成格式识别与转换；本仓库只负责 UI、平台导入链接、结果复制和 Surge 本地写入。
 
 Script-Hub 页的目标平台会同步目标格式、扩展名和快速操作：
@@ -52,7 +52,7 @@ Scripting 在这里是原生模块导入入口，不是另一套代理配置格�
 
 1. 打开 Scripting 的“导入远程脚本”。
 2. 粘贴 `https://github.com/ranzhigg/Scripting-Scripts` 并导入。
-3. 打开脚本，在“设置”中选择 iCloud Drive 的 `Surge` 文件夹；`.sgmodule` 和本地资源会写入其中的 `Module` 子目录。
+3. 打开脚本，在“设置”中选择 iCloud Drive 的 `Surge` 文件夹；`.sgmodule` 写入其中的 `Module` 子目录，脚本和规则资源直接写入 `Surge` 根目录。
 4. 在项目标题的 Intent 设置中启用 `File URLs`、`URLs` 和 `Text`。
 
 ## 使用 Script-Hub 页面
@@ -73,7 +73,7 @@ Scripting 在这里是原生模块导入入口，不是另一套代理配置格�
 
 - 打开“模块管理”页面可刷新模块列表。
 - 远程模块可以单独更新，也可以批量更新；覆盖前会自动备份。
-- 远程脚本和规则集默认继续使用上游 URL。需要彻底本地化时，可在设置中开启“下载时本地化脚本与规则集”，或长按模块执行同名操作；资源会跟随模块写入 `Surge/Module` 下可见的 `Scripts` 对应目录，模块内容保留原始 `#!url` 以便继续更新。旧版本若已显示 `Invalid Local Resource`，对该模块执行一次本地化会把隐藏的 `Module/Offline/.scripting-resources/...` 迁移到 `Offline/Scripts/...`，并同步改写为相对于 `Surge/Module` 的正确路径。
+- 远程脚本和规则集默认继续使用上游 URL。需要彻底本地化时，可在设置中开启“下载时本地化脚本与规则集”，或长按模块执行同名操作；资源会写入 `Surge` 根目录，模块内容保留原始 `#!url` 以便继续更新。旧版本若已显示 `Invalid Local Resource`，对该模块执行一次本地化会把隐藏目录、`Scripts/...` 或带哈希文件名的旧资源迁移到根目录，并改写为 `timecard.js` 这样的裸文件名。
 - 本地化有硬路径校验：只有解析成功的 Surge iCloud 书签目录允许写入资源；未选择、失效或越界时会拒绝操作，不会把资源落到 Scripting 私有目录。
 - 设置页提供“清理旧私有资源”，只删除旧版本生成的 `.scripting-resources`，不会删除模块、备份或配置；若旧目录与当前 Surge 书签重叠，会自动跳过。
 - 新增或首次导入的模块默认保持关闭；确认内容后再在 Surge 中手动启用。若已配置 Surge HTTP API，脚本会在写入后再次发送关闭状态，避免 iCloud 刷新时状态跳变。
@@ -84,21 +84,19 @@ Scripting 在这里是原生模块导入入口，不是另一套代理配置格�
 
 ### iCloud 目录结构与子目录
 
-资源始终写入已授权的 `iCloud Drive/Surge/Module`，不会落到 Scripting 私有目录。设置只需授权 `Surge` 根目录，`Module` 不存在时会自动创建；模块放在子目录时，资源也跟随模块整理：
+模块始终写入已授权的 `iCloud Drive/Surge/Module`，资源写入同一个 `Surge` 根目录，不会落到 Scripting 私有目录。设置只需授权 `Surge` 根目录，`Module` 不存在时会自动创建；模块放在子目录时，资源仍使用根目录文件名：
 
 ```text
-Module/
-├─ Providers/
-│  ├─ Demo.sgmodule
-│  └─ Scripts/
-│     └─ Demo-<稳定标识>/
-│        ├─ scripts/
-│        ├─ rulesets/
-│        └─ includes/
+Surge/
+├─ timecard.js
+├─ rules.list
+├─ Module/
+│  └─ Providers/
+│     └─ Demo.sgmodule
 └─ .surge-module-backups/
 ```
 
-模块内的 `script-path`、`RULE-SET`、`DOMAIN-SET` 和 `#!include` 会按 Surge `Module` 配置根目录改写。因此 `Providers/Demo.sgmodule` 内的资源会写在 `Providers/Scripts/...`，引用为 `Providers/Scripts/...`；普通规则、重写目标、图标和请求参数不会被误改。
+模块内的 `script-path`、`RULE-SET`、`DOMAIN-SET` 和 `#!include` 会改写为 `Surge` 根目录下的裸文件名；普通规则、重写目标、图标和请求参数不会被误改。文件名保持远程 URL 的 basename，不再追加哈希字符。
 
 ### 批量分享与导入
 
@@ -142,11 +140,11 @@ Module/
 
 ### 模块资源本地化失败或想恢复远程资源
 
-本地化只处理 `[Script]` 中的远程 `script-path`、`[Rule]`/`[Ruleset]` 中的远程 `RULE-SET`/`DOMAIN-SET` 和远程 `#!include`，不会改写普通规则、重写目标、图标或请求参数。下载失败时不会写入新的模块内容，并会回滚本次已经写入的资源；模块更新前的版本仍在自动备份中，可通过“回滚版本”恢复。关闭开关不会自动删除已经下载的资源，避免误删；确认不再需要后可在 Surge 模块目录中删除 `Scripts` 下对应模块资源。旧版隐藏目录只作为迁移源保留，不再生成新文件。
+本地化只处理 `[Script]` 中的远程 `script-path`、`[Rule]`/`[Ruleset]` 中的远程 `RULE-SET`/`DOMAIN-SET` 和远程 `#!include`，不会改写普通规则、重写目标、图标或请求参数。下载失败时不会写入新的模块内容，并会回滚本次已经写入的资源；模块更新前的版本仍在自动备份中，可通过“回滚版本”恢复。关闭并保存开关会立即用远程模块文本移除本地资源引用，但已下载的根目录文件保留，避免误删。旧版隐藏目录只作为迁移源保留，不再生成新文件。
 
 ### 分类丢失、重复导入或出现重复模块
 
-分类不是只保存在 Scripting 配置里，而是写进模块正文的 `#!category=分类名`。同名模块导入会写回同一目标文件，已有模块的本地化操作也只更新原文件；重复执行时会去重 `#!category`、`#!local` 和本地化标记，不会追加第二个模块。若手动移动模块文件，请同时移动其对应的 `Scripts/<模块>/` 目录，保持模块内的 profile 相对路径与目录层级一致。
+分类不是只保存在 Scripting 配置里，而是写进模块正文的 `#!category=分类名`。同名模块导入会写回同一目标文件，已有模块的本地化操作也只更新原文件；重复执行时会去重 `#!category`、`#!local` 和本地化标记，不会追加第二个模块。若手动移动模块文件，无需移动脚本资源；根目录文件名保持不变即可。
 
 ## 社区贡献
 

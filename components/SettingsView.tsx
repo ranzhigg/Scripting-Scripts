@@ -521,7 +521,7 @@ export function SettingsView(props: {
             header={<Text>下载设置</Text>}
             footer={(
               <Text font="caption" foregroundStyle="secondaryLabel">
-                开启后，更新或导入模块时会下载 [Script] 中的远程 script-path、[Rule]/[Ruleset] 中的 RULE-SET 或 DOMAIN-SET，以及远程 #!include，保存到 Surge/Module 下可见的 Scripts 文件夹，并按 Surge/Module 配置根目录生成本地相对路径（例如 Offline/Scripts/...）。普通规则、重写目标和请求参数不会被改写；关闭后仍可在模块菜单中单独执行“本地化脚本与规则集”。
+                开启后，保存设置会同步现有远程模块：下载 [Script] 中的远程 script-path、[Rule]/[Ruleset] 中的 RULE-SET 或 DOMAIN-SET，以及远程 #!include，直接保存到 iCloud Drive/Surge 根目录，并在模块中写入根目录文件名（例如 timecard.js）。普通规则、重写目标和请求参数不会被改写；关闭并保存后会把现有远程模块切回远程引用，已有本地文件不会自动删除，仍可在模块菜单中单独执行“本地化脚本与规则集”。
               </Text>
             )}
           >
@@ -552,7 +552,7 @@ export function SettingsView(props: {
                     if (!root) {
                       await Dialog.alert({
                         title: "无法开启本地化",
-                        message: "请先选择有效的 iCloud/Surge 书签文件夹。模块和资源会写入其中的 Module 子目录，不会写入 Scripting 私有目录。",
+                        message: "请先选择有效的 iCloud/Surge 书签文件夹。模块写入其中的 Module 子目录，脚本和规则资源写入 Surge 根目录，不会写入 Scripting 私有目录。",
                       })
                       return
                     }
@@ -567,7 +567,7 @@ export function SettingsView(props: {
             header={<Text>旧数据清理</Text>}
             footer={(
               <Text font="caption" foregroundStyle="secondaryLabel">
-                仅清理旧版本误用的私有资源目录，不会删除模块、备份、分类或配置；新版本资源会写入 Surge/Module 下可见的 Scripts 文件夹。
+                仅清理旧版本误用的私有资源目录，不会删除模块、备份、分类或配置；新版本资源会写入 iCloud Drive/Surge 根目录，模块引用使用文件名而不是嵌套目录。
               </Text>
             )}
           >

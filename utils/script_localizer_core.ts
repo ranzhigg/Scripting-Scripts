@@ -19,10 +19,10 @@ export type RemoteModuleResourceReference = RemoteScriptPathReference & {
 }
 
 /**
- * Return a path suitable for Surge's profile-relative resource fields.
- * Keeping this pure makes the iCloud/subdirectory rule explicit and testable:
- * a module under `Providers/` must reference `Providers/...`, not only the
- * basename of the resource file.
+ * Return a path suitable for Surge's root-relative resource fields.
+ * Keeping this pure makes the iCloud rule explicit and testable: localized
+ * resources live in `Surge/`, so a module under `Module/Providers/` references
+ * the root basename such as `timecard.js`.
  */
 export function relativeProfilePath(profileDir: string, targetPath: string): string {
   const from = String(profileDir ?? "").replace(/\\/g, "/").replace(/\/+$/, "")
@@ -48,13 +48,20 @@ function isRemoteURL(value: string): boolean {
 }
 
 function isLocalResourcePath(value: string): boolean {
-  // `.scripting-resources` was used by early builds, but a dot-directory is
-  // hidden by iCloud Drive's Files provider and is not reliably discovered by
-  // Surge. New local resources live under the visible `Scripts` directory.
-  // Keep the legacy marker so an update can migrate old modules in place.
+  // `.scripting-resources` and `Scripts/...` are legacy layouts. The current
+  // layout deliberately uses a bare filename in the Surge root, because
+  // Surge resolves module resources from that root and does not reliably
+  // discover the nested iCloud paths used by earlier builds.
   const normalized = String(value ?? "").trim()
+  if (!normalized) return false
   if (isRemoteURL(normalized)) return false
-  return /(?:^|[\\/])(?:\.scripting-resources|Scripts)(?:[\\/]|$)/i.test(normalized)
+  if (/(?:^|[\\/])(?:\.scripting-resources|Scripts)(?:[\\/]|$)/i.test(normalized)) return true
+  // Root-level local resources are normally `timecard.js`, `ads.list`, or
+  // `common.conf`. Accept a relative filename/path with an extension so an
+  // already-localized module can be migrated without downloading it again.
+  return !normalized.startsWith("/") && !normalized.includes("://") &&
+    !normalized.startsWith("./") && !normalized.startsWith("../") &&
+    /[^\\/\s]+\.[A-Za-z0-9]{1,16}$/.test(normalized)
 }
 
 function acceptsResourceValue(value: string, includeLocal: boolean): boolean {
@@ -192,7 +199,7 @@ export function extractRemoteModuleResourceReferences(content: string): RemoteMo
   return references
 }
 
-/** Find resources already rewritten into the local visible/legacy resource tree. */
+/** Find resources already rewritten into the local Surge root or legacy tree. */
 export function extractLocalModuleResourceReferences(content: string): RemoteModuleResourceReference[] {
   const lines = String(content ?? "").split(/\r?\n/g)
   const references: RemoteModuleResourceReference[] = []

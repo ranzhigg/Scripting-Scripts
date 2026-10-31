@@ -183,16 +183,13 @@ async function writeFinalModule(
 ): Promise<{ path: string; localizedResources: number }> {
   const preparedContent = prepareModuleText(rawText, info)
   const path = moduleFilePath(info.name, targetDir)
-  const shouldLocalize = (options.localizeResources ?? loadConfig().localizeScriptsOnDownload) || !!info.localResources || !!info.localScripts
+  const shouldLocalize = options.localizeResources ?? loadConfig().localizeScriptsOnDownload
   // Every write is guarded, even when resource localization is disabled. The
-  // resolved `Surge/Module` directory is the relative-path root for Surge
-  // local resources; do not use the outer `Surge` bookmark root or the
-  // module's optional subdirectory here.
-  await requireSurgeProfileDir(targetDir)
-  const profileDir = await getModulesDirResolved()
-  if (!profileDir) throw new Error("Surge Module 配置目录不可用，无法定位本地资源路径")
+  // guard returns the actual iCloud Drive/Surge root; local resources must be
+  // written there because Surge does not reliably discover nested paths.
+  const surgeRoot = await requireSurgeProfileDir(targetDir)
   const localized = shouldLocalize
-    ? await localizeModuleResources(preparedContent, info, path, profileDir)
+    ? await localizeModuleResources(preparedContent, info, path, surgeRoot)
     : null
   const content = localized?.content ?? preparedContent
 
@@ -244,12 +241,10 @@ export async function writeModuleText(
       ? prepareLocalModuleText(rawText, info)
       : validateSurgeModuleText(rawText)
     const path = moduleFilePath(info.name, targetDir)
-    const shouldLocalize = (options.localizeResources ?? loadConfig().localizeScriptsOnDownload) || !!info.localResources || !!info.localScripts
-    await requireSurgeProfileDir(targetDir)
-    const profileDir = await getModulesDirResolved()
-    if (!profileDir) throw new Error("Surge Module 配置目录不可用，无法定位本地资源路径")
+    const shouldLocalize = options.localizeResources ?? loadConfig().localizeScriptsOnDownload
+    const surgeRoot = await requireSurgeProfileDir(targetDir)
     const localized = shouldLocalize
-      ? await localizeModuleResources(preparedContent, info, path, profileDir)
+      ? await localizeModuleResources(preparedContent, info, path, surgeRoot)
       : null
     const content = localized?.content ?? preparedContent
     try {
@@ -344,7 +339,7 @@ export async function downloadModule(
   // Validate before fetching. A failed/stale bookmark must never cause a
   // network request followed by a write into the Scripting private folder.
   await requireSurgeProfileDir(targetDir)
-  const localizeResources = (options.localizeResources ?? loadConfig().localizeScriptsOnDownload) || !!info.localResources || !!info.localScripts
+  const localizeResources = options.localizeResources ?? loadConfig().localizeScriptsOnDownload
   try {
     let result: { path: string; localizedResources: number }
     if (options.mode === "direct") {

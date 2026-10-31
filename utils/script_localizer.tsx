@@ -14,10 +14,6 @@ import type { ModuleInfo } from "./storage"
 const RESOURCE_FETCH_TIMEOUT_MS = 30 * 1000
 const RESOURCE_FILE_OPERATION_TIMEOUT_MS = 15 * 1000
 const MAX_RESOURCE_CHARS = 20 * 1024 * 1024
-// Keep resources visible to both Files and Surge. Dot-directories are hidden
-// by iCloud Drive's Files provider and were reported by Surge as
-// `Invalid Local Resource` even when the bytes existed on disk.
-const RESOURCE_DIRECTORY = "Scripts"
 
 export type ScriptLocalizationResult = {
   content: string
@@ -42,22 +38,14 @@ function fmOrThrow(): any {
   return fm
 }
 
-function shortHash(value: string): string {
-  let hash = 0x811c9dc5
-  for (const char of String(value ?? "")) {
-    hash ^= char.charCodeAt(0)
-    hash = Math.imul(hash, 0x01000193)
-  }
-  return (hash >>> 0).toString(16).padStart(8, "0").slice(0, 8)
-}
-
-function safeSegment(value: string, fallback: string): string {
+function safeFileName(value: string, fallback: string): string {
+  // Preserve the remote basename (including case and Unicode) so the file in
+  // Surge/Files is the same name the provider exposes. Only remove characters
+  // that cannot be used safely as a single path segment.
   const fixed = String(value ?? "")
-    .replace(/[^A-Za-z0-9._-]+/g, "_")
-    .replace(/^\.+/, "")
-    .replace(/_+/g, "_")
-    .replace(/^[_-]+|[_-]+$/g, "")
-    .slice(0, 80)
+    .replace(/[\\/\u0000-\u001f]/g, "_")
+    .replace(/^[.]+$/, "")
+    .slice(0, 180)
   return fixed || fallback
 }
 
@@ -69,11 +57,7 @@ function resourceFileName(url: string, kind: RemoteModuleResourceReference["kind
     const path = parsed.pathname.split("/").pop() ?? ""
     if (path) last = decodeURIComponent(path)
   } catch {}
-
-  const defaultExtension = kind === "script" ? ".js" : kind === "include" ? ".conf" : ".list"
-  const extension = last.match(/\.[A-Za-z0-9]{1,8}$/)?.[0] ?? defaultExtension
-  const stem = last.replace(/\.[A-Za-z0-9]{1,8}$/, "") || kind
-  return `${safeSegment(stem, kind)}-${shortHash(`${kind}:${url}`)}${extension.toLowerCase()}`
+  return safeFileName(last, fallback)
 }
 
 function pathBaseName(path: string): string {
@@ -81,29 +65,25 @@ function pathBaseName(path: string): string {
   return normalized.split("/").pop() ?? ""
 }
 
+function inferResourceRoot(modulePath: string): string {
+  const normalized = String(modulePath ?? "").replace(/\\/g, "/").replace(/\/+$/, "")
+  const parts = normalized.split("/")
+  const moduleIndex = parts.map((item) => item.toLowerCase()).lastIndexOf("module")
+  const modulesIndex = parts.map((item) => item.toLowerCase()).lastIndexOf("modules")
+  const index = Math.max(moduleIndex, modulesIndex)
+  if (index > 0) return parts.slice(0, index).join("/") || "/"
+  return Path.dirname(Path.dirname(modulePath))
+}
+
 function migratedResourceFileName(path: string, kind: RemoteModuleResourceReference["kind"]): string {
   const base = pathBaseName(path)
-  if (base && /\.[A-Za-z0-9]{1,8}$/.test(base)) return safeSegment(base, resourceFileName(path, kind))
+  // Earlier builds appended an 8-character URL hash. Strip only that known
+  // generated suffix while keeping the original remote basename intact.
+  const withoutGeneratedHash = base.replace(/^(.*)-[0-9a-f]{8}(\.[^./]+)$/i, "$1$2")
+  if (withoutGeneratedHash && /\.[A-Za-z0-9]{1,16}$/.test(withoutGeneratedHash)) {
+    return safeFileName(withoutGeneratedHash, resourceFileName(path, kind))
+  }
   return resourceFileName(path, kind)
-}
-
-function isLegacyResourcePath(value: string): boolean {
-  return /(?:^|[\\/])\.scripting-resources(?:[\\/]|$)/i.test(String(value ?? "").trim())
-}
-
-function moduleResourceDirectory(
-  modulePath: string,
-  moduleName: string,
-  kind: RemoteModuleResourceReference["kind"],
-): string {
-  // Keep resources beside the module in a visible directory. If the module is
-  // in an iCloud Surge subdirectory, this deliberately produces
-  // `<subdir>/Scripts/<module>/...`; the caller then rewrites the module
-  // reference relative to the Surge `Module` profile directory.
-  const moduleDir = Path.dirname(modulePath)
-  const directoryName = `${safeSegment(moduleName, "module")}-${shortHash(moduleName)}`
-  const kindDir = kind === "script" ? "scripts" : kind === "include" ? "includes" : "rulesets"
-  return Path.join(moduleDir, RESOURCE_DIRECTORY, directoryName, kindDir)
 }
 
 async function exists(path: string): Promise<boolean> {
@@ -258,31 +238,31 @@ async function rollbackChanges(changes: FileChange[]): Promise<void> {
 /**
  * Repair local references produced by older builds.
  *
- * Resources are intentionally stored beside their module in the visible
- * `Scripts` directory, while Surge resolves `script-path` and external rule
- * resources against its Module profile directory. Therefore a module in
- * `Module/Offline/BoxJs.sgmodule` must use `Offline/Scripts/...`. The v4.2.11 form
- * `Module/Offline/.scripting-resources/...` treated the outer iCloud bookmark
- * as if it were the Surge profile directory and resulted in Invalid Local
- * Resource; the earlier short form `.scripting-resources/...` also omitted the
- * module's `Offline/` prefix. Existing hidden resources are copied into the
- * visible tree during this migration.
+ * Surge resolves a module's local `script-path`, `RULE-SET`, `DOMAIN-SET`,
+ * and `#!include` values from the Surge profile root. The only layout that is
+ * reliably discovered by both Surge and Files is therefore:
+ *
+ *   Surge/timecard.js
+ *   Surge/Module/Offline/timecard.sgmodule  ->  script-path=timecard.js
+ *
+ * Migrate hidden `.scripting-resources`, the intermediate `Scripts/...` tree,
+ * and old hash-suffixed root files into that canonical root-level layout.
  */
 async function rebaseExistingLocalResourcePaths(
   content: string,
   modulePath: string,
-  moduleName: string,
-  profileDir?: string,
+  resourceRoot?: string,
   changes: FileChange[] = [],
 ): Promise<string> {
   const references = extractLocalModuleResourceReferences(content)
   if (!references.length) return content
 
   const moduleDir = Path.dirname(modulePath)
-  // `profileDir` is the actual Surge Module/profile directory, not the outer
-  // iCloud/Surge bookmark and not the module's optional subdirectory.
-  const rootDir = profileDir || moduleDir
+  const rootDir = String(resourceRoot ?? "").trim() || inferResourceRoot(modulePath)
+  const moduleRoot = Path.join(rootDir, "Module")
+  const modulesRoot = Path.join(rootDir, "Modules")
   const replacements = new Map<string, string>()
+  const targetSources = new Map<string, string>()
 
   function parentDirectory(path: string): string {
     const normalized = String(path ?? "").replace(/\\/g, "/").replace(/\/+$/, "")
@@ -298,10 +278,12 @@ async function rebaseExistingLocalResourcePaths(
       candidates.push(candidate)
     }
 
-    // Current modules and the original v4.2.9 layout keep resources beside
-    // the module. Keep the selected module directory first.
-    add(Path.join(moduleDir, value))
+    // Search the actual Surge root first for the current root-level layout,
+    // then the module/profile directories used by previous builds.
     add(Path.join(rootDir, value))
+    add(Path.join(moduleDir, value))
+    add(Path.join(moduleRoot, value))
+    add(Path.join(modulesRoot, value))
 
     // v4.2.11 wrote a path relative to the outer `Surge` bookmark, for
     // example `Module/Offline/.scripting-resources/...`. Walk the containing
@@ -314,9 +296,6 @@ async function rebaseExistingLocalResourcePaths(
       add(Path.join(ancestor, value))
     }
 
-    // Preserve the short-lived `Module`/`Modules` compatibility layouts.
-    add(Path.join(rootDir, "Module", value))
-    add(Path.join(rootDir, "Modules", value))
     return candidates
   }
 
@@ -331,25 +310,28 @@ async function rebaseExistingLocalResourcePaths(
     }
     if (!physicalPath) continue
 
-    let nextPhysicalPath = physicalPath
-    if (isLegacyResourcePath(value)) {
-      const visibleDirectory = moduleResourceDirectory(modulePath, moduleName, reference.kind)
-      const visiblePath = Path.join(
-        visibleDirectory,
-        migratedResourceFileName(physicalPath, reference.kind),
-      )
-      const sourceText = await readString(physicalPath)
-      let currentText: string | undefined
-      if (await resourceFileExists(visiblePath)) {
-        try { currentText = await readString(visiblePath) } catch {}
-      }
-      if (currentText !== sourceText) {
-        changes.push(await writeResourceFile(visiblePath, sourceText))
-      }
-      nextPhysicalPath = visiblePath
+    // Always canonicalize an existing local reference into the Surge root.
+    // This handles hidden legacy paths, the intermediate Scripts tree, and
+    // the hash-suffixed root files shown in the Files screenshots.
+    const visiblePath = Path.join(rootDir, migratedResourceFileName(physicalPath, reference.kind))
+    const previousSource = targetSources.get(visiblePath)
+    if (previousSource && previousSource !== physicalPath) {
+      throw new Error(`本地资源文件名冲突：${pathBaseName(visiblePath)}（${previousSource} 与 ${physicalPath}）`)
+    }
+    targetSources.set(visiblePath, physicalPath)
+    const sourceText = await readString(physicalPath)
+    let currentText: string | undefined
+    if (await resourceFileExists(visiblePath)) {
+      try { currentText = await readString(visiblePath) } catch {}
+    }
+    if (currentText !== undefined && currentText !== sourceText && visiblePath !== physicalPath) {
+      throw new Error(`Surge 根目录已有同名资源且内容不同：${pathBaseName(visiblePath)}`)
+    }
+    if (currentText !== sourceText) {
+      changes.push(await writeResourceFile(visiblePath, sourceText))
     }
 
-    const relative = relativeProfilePath(rootDir, nextPhysicalPath)
+    const relative = relativeProfilePath(rootDir, visiblePath)
     if (relative && relative !== value) {
       replacements.set(`${reference.kind}:${value}`, relative)
     }
@@ -361,12 +343,12 @@ async function rebaseExistingLocalResourcePaths(
 
 async function verifyLocalResourcePaths(
   content: string,
-  profileDir: string,
+  resourceRoot: string,
 ): Promise<void> {
   const references = extractLocalModuleResourceReferences(content)
   for (const reference of references) {
     const value = String(reference.value ?? "").trim()
-    const path = value.startsWith("/") ? value : Path.join(profileDir, value)
+    const path = value.startsWith("/") ? value : Path.join(resourceRoot, value)
     if (!(await resourceFileExists(path))) {
       throw new Error(`本地资源不存在：${value}`)
     }
@@ -380,12 +362,13 @@ async function verifyLocalResourcePaths(
  */
 export async function localizeModuleResources(
   content: string,
-  info: Pick<ModuleInfo, "name">,
+  _info: Pick<ModuleInfo, "name">,
   modulePath: string,
-  profileDir?: string,
+  resourceRoot?: string,
 ): Promise<ScriptLocalizationResult> {
   const replacements = new Map<string, string>()
   const changes: FileChange[] = []
+  const rootDir = String(resourceRoot ?? "").trim() || inferResourceRoot(modulePath)
 
   // First repair paths already pointing at a local resource. This path
   // is deliberately offline: a local module should not be re-fetched merely
@@ -395,8 +378,7 @@ export async function localizeModuleResources(
     rebasedContent = await rebaseExistingLocalResourcePaths(
       content,
       modulePath,
-      info.name,
-      profileDir,
+      rootDir,
       changes,
     )
   } catch (error) {
@@ -409,7 +391,7 @@ export async function localizeModuleResources(
       /^\s*#!\s*(?:local-resources|local-scripts)\s*=/im.test(rebasedContent) ||
       extractLocalModuleResourceReferences(rebasedContent).length > 0
     if (hasLocalizationMarker) {
-      await verifyLocalResourcePaths(rebasedContent, profileDir || Path.dirname(modulePath))
+      await verifyLocalResourcePaths(rebasedContent, rootDir)
     }
     return {
       // A beta build used `#!local-scripts`; normalize that marker even when
@@ -428,19 +410,25 @@ export async function localizeModuleResources(
   const uniqueResources = Array.from(
     new Map(references.map((ref) => [`${ref.kind}:${ref.value}`, ref])).values(),
   )
-  // Surge resolves local module resource fields against the Module profile
-  // directory. Keep the physical tree beside the module in the visible
-  // `Scripts/...` tree and write the corresponding profile-relative path.
-  const rootDir = profileDir || Path.dirname(modulePath)
+  const targetURLs = new Map<string, string>()
+  const resourceTexts = new Map<string, string>()
 
   try {
     for (const reference of uniqueResources) {
-      const directory = moduleResourceDirectory(modulePath, info.name, reference.kind)
-      const filePath = Path.join(directory, resourceFileName(reference.value, reference.kind))
+      const filePath = Path.join(rootDir, resourceFileName(reference.value, reference.kind))
+      const previousURL = targetURLs.get(filePath)
+      if (previousURL && previousURL !== reference.value) {
+        throw new Error(`远程资源文件名冲突：${pathBaseName(filePath)}（${previousURL} 与 ${reference.value}）`)
+      }
+      targetURLs.set(filePath, reference.value)
       const relative = relativeProfilePath(rootDir, filePath)
-      const resourceText = await fetchResourceText(reference.value)
+      let resourceText = resourceTexts.get(filePath)
+      if (resourceText === undefined) {
+        resourceText = await fetchResourceText(reference.value)
+        resourceTexts.set(filePath, resourceText)
+      }
       const current = await (async () => {
-        if (!(await exists(filePath))) return undefined
+        if (!(await resourceFileExists(filePath))) return undefined
         try { return await readString(filePath) } catch { return undefined }
       })()
       if (current !== resourceText) {

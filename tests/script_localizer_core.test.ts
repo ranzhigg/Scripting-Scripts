@@ -76,10 +76,10 @@ if (rewriteRemoteModuleResources(kindSpecific, new Map()).includes("https://cdn.
   throw new Error("rewritten local paths unexpectedly became remote again")
 }
 
-const profileRoot = "/icloud/Surge/Module"
-const nestedResource = "/icloud/Surge/Module/Providers/Demo/.scripting-resources/Demo-aabbccdd/scripts/demo.js"
-if (relativeProfilePath(profileRoot, nestedResource) !== "Providers/Demo/.scripting-resources/Demo-aabbccdd/scripts/demo.js") {
-  throw new Error("nested iCloud module path was not kept relative to the Surge Module profile root")
+const profileRoot = "/icloud/Surge"
+const rootResource = "/icloud/Surge/timecard.js"
+if (relativeProfilePath(profileRoot, rootResource) !== "timecard.js") {
+  throw new Error("Surge root resource path was not reduced to its basename")
 }
 
 const localSample = [
@@ -91,24 +91,24 @@ const localSample = [
 const localReferences = extractLocalModuleResourceReferences(localSample)
 if (localReferences.length !== 2) throw new Error(`expected 2 local resources, got ${localReferences.length}`)
 const rebased = rewriteModuleResourceReferences(localSample, localReferences, new Map([
-  ["script:.scripting-resources/demo/scripts/a.js", "Offline/.scripting-resources/demo/scripts/a.js"],
-  ["ruleset:.scripting-resources/demo/rulesets/a.list", "Offline/.scripting-resources/demo/rulesets/a.list"],
+  ["script:.scripting-resources/demo/scripts/a.js", "Scripts/demo/scripts/a.js"],
+  ["ruleset:.scripting-resources/demo/rulesets/a.list", "Scripts/demo/rulesets/a.list"],
 ]))
-if (!rebased.includes("script-path=Offline/.scripting-resources/demo/scripts/a.js")) {
+if (!rebased.includes("script-path=Scripts/demo/scripts/a.js")) {
   throw new Error("local script path was not rebased")
 }
-if (!rebased.includes("RULE-SET,Offline/.scripting-resources/demo/rulesets/a.list,REJECT")) {
+if (!rebased.includes("RULE-SET,Scripts/demo/rulesets/a.list,REJECT")) {
   throw new Error("local ruleset path was not rebased")
 }
 
 const visibleLocalSample = [
   "[Script]",
-  "foo = type=generic,script-path=Offline/Scripts/demo-1234/scripts/a.js",
+  "foo = type=generic,script-path=timecard.js",
   "[Rule]",
-  "RULE-SET,Offline/Scripts/demo-1234/rulesets/a.list,REJECT",
+  "RULE-SET,rules.list,REJECT",
 ].join("\n")
 const visibleLocalReferences = extractLocalModuleResourceReferences(visibleLocalSample)
-if (visibleLocalReferences.length !== 2) throw new Error("visible Scripts resources were not recognized")
+if (visibleLocalReferences.length !== 2) throw new Error("root resources were not recognized")
 const remoteScriptsPath = extractLocalModuleResourceReferences(
   "[Script]\nfoo = type=generic,script-path=https://cdn.example.com/Scripts/foo.js",
 )

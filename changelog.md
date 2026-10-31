@@ -1,9 +1,15 @@
 # 更新日志
 
+## v4.2.15
+
+- 修正 Surge 本地资源落盘位置：脚本、规则集和 include 直接写入 `iCloud Drive/Surge` 根目录，模块引用使用裸文件名（例如 `script-path=timecard.js`），不再使用无法被 Surge 稳定识别的嵌套目录。
+- 远程资源文件名恢复为 URL 的真实 basename，不再追加哈希后缀；迁移旧版本时会把 `.scripting-resources`、`Scripts/...` 和 `timecard-5ed57ad9.js` 等旧路径整理到根目录。
+- 本地化开关关闭并保存后，会同步现有远程模块并恢复远程脚本/规则引用；已有根目录文件保留，不自动删除。写入或本地化完成后，会尝试刷新当前已启用的 Surge 模块。
+
 ## v4.2.14
 
-- 修复资源不可见导致的 `Invalid Local Resource`：新本地化资源不再写入隐藏的 `.scripting-resources`，统一写入 Surge/Module 下可见的 `Scripts/<模块>/` 目录。
-- 迁移旧模块时会把已有隐藏目录中的脚本、规则集和 include 复制到可见目录，并同步把模块内的 `script-path`、`RULE-SET`、`DOMAIN-SET` 和 `#!include` 改为相对于 Surge/Module 的 `Offline/Scripts/...` 路径；不重复下载已有文件。
+- 修复资源不可见导致的 `Invalid Local Resource`：新本地化资源不再写入隐藏的 `.scripting-resources`，统一写入模块所在目录下可见的 `Scripts/<模块>/` 目录。
+- 迁移旧模块时会把已有隐藏目录或错误的 `Offline/Scripts/...` 路径中的脚本、规则集和 include 复制到模块目录的可见资源树，并同步把模块内引用改为 `Scripts/...`；不重复下载已有文件。
 
 ## v4.2.13
 

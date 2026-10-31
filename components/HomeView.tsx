@@ -48,6 +48,7 @@ import {
   disableNewModuleByDefault,
   fetchEnabledModuleNames,
   getModuleRemoteName,
+  refreshEnabledRemoteModule,
   setRemoteModuleEnabled,
 } from "../utils/remote_control"
 import { autoExportMetadataToICloud } from "../utils/metadata_sync"
@@ -542,6 +543,15 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
     await autoExportMetadataToICloud(cfg)
   }
 
+  async function syncLocalizationSetting(enabled: boolean) {
+    const remoteModules = modules.filter((item) => !!item.link)
+    if (!remoteModules.length) return
+    await downloadBatch(
+      remoteModules,
+      enabled ? "开启本地化：同步现有模块…" : "关闭本地化：切回远程引用…",
+    )
+  }
+
   useEffect(() => {
     void refreshModules()
   }, [props.refreshToken])
@@ -702,7 +712,9 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
         <SettingsView
           initial={loadConfig()}
           onDone={(next) => {
+            const localizationChanged = cfg.localizeScriptsOnDownload !== next.localizeScriptsOnDownload
             setCfg(next)
+            if (localizationChanged) void syncLocalizationSetting(next.localizeScriptsOnDownload)
           }}
         />
       ),
@@ -965,12 +977,8 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
     setStage(`整理现有模块资源：${target.name}`)
     try {
       // Process the file that is actually in the Surge directory. This is
-      // intentionally offline for already-localized modules: fetching
-      // `#!url` again can return a converter response or a partial module and
-      // would overwrite a valid local copy. The localizer rebases old
-      // profile-relative resource paths and downloads only still-remote
-      // resources found in the current file. For a module in Offline/, the
-      // resulting reference must retain that prefix.
+      // intentionally offline for an explicit localization action: the
+      // localizer can migrate old paths without fetching the module again.
       const fm: any = (globalThis as any).FileManager
       if (!fm?.readAsString) throw new Error("FileManager.readAsString 不可用")
       const content = String(await fm.readAsString(path) ?? "")
@@ -981,19 +989,37 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
         { localizeResources: true },
       )
       if (!result.ok) throw new Error(result.message ?? "模块资源本地化失败")
+      let surgeReloaded = false
+      let surgeReloadFailed = false
+      try {
+        // The iCloud file is now correct, but Surge may still hold the old
+        // module text in its active profile. Toggle only an already-enabled
+        // module so its state is preserved while forcing a reread.
+        surgeReloaded = await refreshEnabledRemoteModule(
+          loadConfig(),
+          getModuleRemoteName(target),
+        )
+      } catch {
+        surgeReloadFailed = true
+      }
       await refreshModules()
       await syncMetadataIfNeeded()
+      const surgeReloadMessage = surgeReloaded
+        ? "Surge 已重新加载该模块。"
+        : surgeReloadFailed
+          ? "Surge 自动刷新失败，请在 Surge 中关闭后重新启用该模块。"
+          : "如 Surge 仍显示旧路径，请在 Surge 中关闭后重新启用该模块。"
       if (result.localizedResources) {
         setStage(`资源已写入 Surge 配置目录：${result.localizedResources} 个`)
         await Dialog.alert({
           title: "已整理并本地化",
-          message: `已处理 ${result.localizedResources} 个远程资源，并写入当前 Surge iCloud 模块目录的可见 Scripts 文件夹。\n\n资源引用已按 Surge/Module 配置根目录生成；如果 Surge 仍显示 Invalid Local Resource，请在 Surge 的 External Resources 中点 Update All，确认模块文件和 Offline/Scripts 位于同一 Surge 配置目录体系内。`,
+          message: `已处理 ${result.localizedResources} 个远程资源，并写入 Surge 根目录；模块引用已改为根目录文件名。\n\n${surgeReloadMessage}\n例如：文件为 Surge/timecard.js，模块内应为 script-path=timecard.js。`,
         })
       } else {
         setStage("模块没有可下载的远程资源")
         await Dialog.alert({ message: target.link
-          ? "当前模块没有发现可本地化的远程脚本、规则集或 include；已有本地路径已完成校正。"
-          : "当前本地模块没有可本地化的远程脚本、规则集或 include。" })
+          ? `当前模块没有发现可本地化的远程脚本、规则集或 include；已有本地路径已完成校正。\n\n${surgeReloadMessage}`
+          : `当前本地模块没有可本地化的远程脚本、规则集或 include。\n\n${surgeReloadMessage}` })
       }
     } catch (e: any) {
       const message = String(e?.message ?? e)
@@ -1154,6 +1180,8 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
     const errors: string[] = []
     let okCount = 0
     let localizedResourceCount = 0
+    const updatedRemoteNames: string[] = []
+    let surgeReloadedCount = 0
     try {
       const total = downloadable.length
       let nextIndex = 0
@@ -1175,22 +1203,17 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
 
           const m = downloadable[idx]
           const linkPrefix = await detectLinkPrefix(m)
-          let sourceContent = sourceContents?.get(moduleKey(m))
-          if (sourceContent === undefined && m.localResources && m.filePath) {
-            try {
-              const fm: any = (globalThis as any).FileManager
-              if (fm?.readAsString) sourceContent = String(await fm.readAsString(m.filePath) ?? "")
-            } catch {}
-          }
+          const sourceContent = sourceContents?.get(moduleKey(m))
           const res = await downloadModule(
             { ...m, saveDir: inferSaveDir(m), linkPrefix },
             sourceContent === undefined
               ? undefined
-              : { content: sourceContent, localizeResources: true },
+              : { content: sourceContent, localizeResources: loadConfig().localizeScriptsOnDownload },
           )
           if (res.ok) {
             okCount += 1
             localizedResourceCount += res.localizedResources ?? 0
+            updatedRemoteNames.push(getModuleRemoteName(m))
             recordRecentImport(m)
           }
           else errors.push(`${m.name}: ${res.message ?? "下载失败"}`)
@@ -1203,10 +1226,19 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
       const workers = Array.from({ length: concurrency }, () => worker())
       await Promise.all(workers)
 
+      // iCloud file writes do not necessarily invalidate Surge's in-memory
+      // module text. Re-read every updated module that was already enabled;
+      // disabled modules remain disabled and are left untouched.
+      for (const remoteName of Array.from(new Set(updatedRemoteNames))) {
+        try {
+          if (await refreshEnabledRemoteModule(loadConfig(), remoteName)) surgeReloadedCount += 1
+        } catch {}
+      }
+
       if (errors.length) {
         const details = errors.join("\n")
         setLastFailureDetails(details)
-        setStage(`下载完成：成功 ${okCount}/${total}`)
+        setStage(`下载完成：成功 ${okCount}/${total}${surgeReloadedCount ? `；Surge 已刷新 ${surgeReloadedCount} 个模块` : ""}`)
         await Dialog.alert({
           title: "部分下载失败",
           message: `${errors.slice(0, 8).join("\n")}${errors.length > 8 ? `\n其余 ${errors.length - 8} 个失败已省略` : ""}\n\n可在状态区域复制完整失败详情。`,
@@ -1214,9 +1246,9 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
       } else {
         setLastFailureDetails("")
         setStage(
-          localizedResourceCount
+          `${localizedResourceCount
             ? `下载完成：${okCount}/${total}（模块资源本地化 ${localizedResourceCount} 个）`
-            : `下载完成：${okCount}/${total}`,
+            : `下载完成：${okCount}/${total}`}${surgeReloadedCount ? `；Surge 已刷新 ${surgeReloadedCount} 个模块` : "；请在 Surge 中重新启用已更新模块以加载新路径"}`,
         )
       }
       if (okCount > 0) {
