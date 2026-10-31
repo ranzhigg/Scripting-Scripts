@@ -825,7 +825,9 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
         if (!result.ok) throw new Error(result.message ?? "本地模块写入失败")
         addedModule = await loadModuleAtPath(result.path ?? moduleFilePath(info.name, info.saveDir)) ?? info
         recordRecentImport(addedModule)
-        setStage(result.localizedResources ? `添加完成（模块资源已本地化 ${result.localizedResources} 个）` : "添加完成（已保存）")
+        setStage(result.localizedResources
+          ? `添加完成（模块资源已本地化 ${result.localizedResources} 个）：${result.path ?? info.saveDir ?? "当前配置目录"}`
+          : `添加完成（已写入 Surge）：${result.path ?? info.saveDir ?? "当前配置目录"}`)
       } else {
         setStage(`下载模块：${info.name}`)
         const res = await downloadModule(info)
@@ -835,7 +837,7 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
         } else {
           addedModule = await loadModuleAtPath(res.path ?? moduleFilePath(info.name, info.saveDir)) ?? info
           recordRecentImport(addedModule)
-          setStage("添加完成（已下载）")
+          setStage(`添加完成（已写入 Surge）：${res.path ?? "当前配置目录"}`)
         }
       }
 
@@ -961,48 +963,40 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
       return
     }
     setBusy(true)
-    setStage(`重新下载并本地化：${target.name}`)
+    setStage(`整理现有模块资源：${target.name}`)
     try {
       const profileDir = await getSurgeBookmarkRoot()
       if (!profileDir) throw new Error("Surge iCloud 书签根目录不可用，请在设置页重新选择")
 
-      // A previously localized module contains only local `.scripting-resources`
-      // paths. Reading that file again cannot repair a missing resource because
-      // the parser quite correctly finds no HTTP(S) source to download. For a
-      // remote module, always fetch the original `#!url` source again so this
-      // action also repairs the invalid-local-resource state left by older
-      // versions or by a partial iCloud sync. The module is still written to
-      // its existing directory; no second copy is created.
-      const result = target.link
-        ? await downloadModule(
-            { ...target, saveDir: targetDir, filePath: path },
-            { localizeResources: true, profileDir },
-          )
-        : await (async () => {
-            const fm: any = (globalThis as any).FileManager
-            if (!fm?.readAsString) throw new Error("FileManager.readAsString 不可用")
-            const content = String(await fm.readAsString(path) ?? "")
-            return writeModuleText(
-              { ...target, saveDir: targetDir, filePath: path },
-              targetDir,
-              content,
-              { localizeResources: true, profileDir },
-            )
-          })()
+      // Process the file that is actually in the Surge directory. This is
+      // intentionally offline for already-localized modules: fetching
+      // `#!url` again can return a converter response or a partial module and
+      // would overwrite a valid local copy. The localizer rebases old
+      // `.scripting-resources/...` paths and downloads only still-remote
+      // resources found in the current file.
+      const fm: any = (globalThis as any).FileManager
+      if (!fm?.readAsString) throw new Error("FileManager.readAsString 不可用")
+      const content = String(await fm.readAsString(path) ?? "")
+      const result = await writeModuleText(
+        { ...target, saveDir: targetDir, filePath: path },
+        targetDir,
+        content,
+        { localizeResources: true, profileDir },
+      )
       if (!result.ok) throw new Error(result.message ?? "模块资源本地化失败")
       await refreshModules()
       await syncMetadataIfNeeded()
       if (result.localizedResources) {
-        setStage(`资源已写入 Surge/Module：${result.localizedResources} 个`)
+        setStage(`资源已写入 Surge 配置目录：${result.localizedResources} 个`)
         await Dialog.alert({
-          title: "已重新下载并本地化",
-          message: `已从模块来源重新下载 ${result.localizedResources} 个资源，并写入当前 Surge iCloud 模块目录。\n\n如果 Surge 仍显示 Invalid Local Resource，请在 Surge 中点一次“更新全部”或重新加载模块。`,
+          title: "已整理并本地化",
+          message: `已处理 ${result.localizedResources} 个远程资源，并写入当前 Surge iCloud 模块目录。\n\n如果 Surge 仍显示 Invalid Local Resource，请确认模块文件和 .scripting-resources 位于同一 Surge 配置目录体系内。`,
         })
       } else {
         setStage("模块没有可下载的远程资源")
         await Dialog.alert({ message: target.link
-          ? "来源已重新拉取，但没有发现可本地化的远程脚本、规则集或 include。"
-          : "这个本地模块没有来源链接，无法自动补回已经丢失的资源；请重新导入带有远程资源的原始模块。" })
+          ? "当前模块没有发现可本地化的远程脚本、规则集或 include；已有本地路径已完成校正。"
+          : "当前本地模块没有可本地化的远程脚本、规则集或 include。" })
       }
     } catch (e: any) {
       const message = String(e?.message ?? e)
@@ -1184,10 +1178,18 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
 
           const m = downloadable[idx]
           const linkPrefix = await detectLinkPrefix(m)
-          const sourceContent = sourceContents?.get(moduleKey(m))
+          let sourceContent = sourceContents?.get(moduleKey(m))
+          if (sourceContent === undefined && m.localResources && m.filePath) {
+            try {
+              const fm: any = (globalThis as any).FileManager
+              if (fm?.readAsString) sourceContent = String(await fm.readAsString(m.filePath) ?? "")
+            } catch {}
+          }
           const res = await downloadModule(
             { ...m, saveDir: inferSaveDir(m), linkPrefix },
-            sourceContent === undefined ? undefined : { content: sourceContent },
+            sourceContent === undefined
+              ? undefined
+              : { content: sourceContent, localizeResources: true },
           )
           if (res.ok) {
             okCount += 1

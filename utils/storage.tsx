@@ -22,7 +22,6 @@ export type ModuleInfo = {
 
 const BASE_DIR_NAME = "SurgeModulesManager"
 const MODULES_DIR_NAME = "Modules"
-const SURGE_MODULE_DIR_NAME = "Module"
 const LEGACY_RESOURCE_DIR_NAME = ".scripting-resources"
 const BUILTIN_LINK_PREFIXES = ["#!url=", "#SUBSCRIBED"]
 
@@ -49,19 +48,6 @@ function normalizePath(path: string): string {
   return String(path ?? "").replace(/\/+$/, "")
 }
 
-/**
- * The bookmark is the user's iCloud/Surge directory. Surge keeps local
- * modules in its `Module` child. Accept an already-selected Module folder as
- * a compatibility path so existing installations are not nested again.
- */
-function surgeModuleDirectory(root: string): string {
-  const normalized = normalizePath(root)
-  if (!normalized) return ""
-  const last = normalized.split("/").pop()?.toLowerCase() ?? ""
-  if (last === "module" || last === "modules") return normalized
-  return Path.join(normalized, SURGE_MODULE_DIR_NAME)
-}
-
 function pickRootDir(): string {
   const fm = fmOrThrow()
   if (fm.isiCloudEnabled && fm.iCloudDocumentsDirectory) {
@@ -78,8 +64,10 @@ export function getBaseDir(): string {
 
 export function getModulesDir(): string {
   const cfg = loadConfig()
-  if (cfg.baseDir) return surgeModuleDirectory(cfg.baseDir)
-  return Path.join(getBaseDir(), MODULES_DIR_NAME)
+  if (cfg.baseDir) return cfg.baseDir
+  // Do not silently fall back to Scripting's private documents directory.
+  // Callers that write modules must surface the missing Surge bookmark.
+  return ""
 }
 
 async function resolveBookmarkedPath(rawPath: string, bookmarkName?: string): Promise<string> {
@@ -125,31 +113,30 @@ export async function getModulesDirResolved(baseDir?: string): Promise<string> {
   const configured = String(cfg.baseDir ?? "").trim()
   const bookmarkName = String(cfg.baseBookmarkName ?? "").trim()
   const target = String(baseDir ?? "").trim()
-  if (!configured && !target) return getModulesDir()
+  if (!configured && !target) return ""
 
   if (!target) {
-    if (!configured) return getModulesDir()
+    if (!configured) return ""
     const resolved = await resolveBookmarkedPath(configured, bookmarkName)
-    if (resolved) return surgeModuleDirectory(resolved)
-    return bookmarkName ? "" : surgeModuleDirectory(configured)
+    if (resolved) return resolved
+    return bookmarkName ? "" : configured
   }
 
   if (configured && normalizePath(target) === normalizePath(configured)) {
     const resolved = await resolveBookmarkedPath(target, bookmarkName)
-    if (resolved) return surgeModuleDirectory(resolved)
-    return bookmarkName ? "" : surgeModuleDirectory(target)
+    if (resolved) return resolved
+    return bookmarkName ? "" : target
   }
   return target
 }
 
 /**
- * Return the resolved iCloud/Surge bookmark root selected by the user.
+ * Return the resolved iCloud/Surge profile directory selected by the user.
  *
- * Resource localization must never fall back to Scripting's own documents
- * directory. The module directory is resolved separately as its `Module`
- * child, while this root is used for the security-scope boundary check.
- * Requiring both the configured path and bookmark name lets callers
- * distinguish a real, still-valid external folder from the legacy fallback.
+ * Surge treats this directory as the profile root: local `.sgmodule` files
+ * are read from it and relative script/ruleset paths are resolved from it.
+ * Requiring both the configured path and bookmark name prevents a stale path
+ * from silently falling back to Scripting's private documents directory.
  */
 export async function getSurgeBookmarkRoot(): Promise<string> {
   try {
@@ -165,6 +152,25 @@ export async function getSurgeBookmarkRoot(): Promise<string> {
   } catch {
     return ""
   }
+}
+
+/**
+ * Guard every module write with the selected Surge bookmark boundary.
+ *
+ * Legacy private-resource cleanup remains an explicit maintenance action, but
+ * no new module or resource may be written there. This is the invariant that
+ * makes a successful import visible to Surge and to Files.
+ */
+export async function requireSurgeProfileDir(targetDir?: string): Promise<string> {
+  const root = await getSurgeBookmarkRoot()
+  if (!root) {
+    throw new Error("请先在设置中选择有效的 iCloud Drive/Surge 配置目录；模块不会写入 Scripting 私有目录")
+  }
+  const target = String(targetDir ?? (await getModulesDirResolved())).trim()
+  if (!target || !isPathWithin(root, target)) {
+    throw new Error("模块目标目录不在已授权的 iCloud Drive/Surge 配置目录内，已拒绝写入")
+  }
+  return root
 }
 
 export function isPathWithin(root: string, target: string): boolean {
@@ -201,16 +207,12 @@ export async function ensureStorage(): Promise<void> {
     if (!resolved) {
       throw new Error("书签路径不可用，请在设置页重新选择书签文件夹")
     }
-    // The user authorizes the iCloud/Surge folder. Create its Module child on
-    // first use (or reuse it when it already exists); all module and resource
-    // writes then stay under that security-scoped directory.
-    await ensureDir(resolved)
+    // The selected iCloud/Surge folder is Surge's profile directory. Do not
+    // create a guessed child such as `Module`: Surge loads local .sgmodule
+    // files from the selected profile directory itself.
     return
   }
-  await ensureDir(getBaseDir())
-  if (!cfg.baseDir) {
-    await ensureDir(getModulesDir())
-  }
+  throw new Error("请先在设置中选择有效的 iCloud Drive/Surge 配置目录；不会回退到 Scripting 私有目录")
 }
 
 function extractNameFromPath(p: string): string {
@@ -373,10 +375,9 @@ function parentDirectory(path: string): string {
 }
 
 /**
- * Read the new Surge/Module directory and the old selected-root location.
- * Before the automatic Module-folder handling was added, modules could be
- * written directly into iCloud/Surge. Keep that location visible so changing
- * the storage rule never makes existing modules appear deleted.
+ * Read the selected Surge profile directory recursively. The optional
+ * `Module` child is included for files created during the short-lived folder
+ * migration, while the selected root remains the authoritative write target.
  */
 async function moduleSearchDirectories(primaryDir?: string): Promise<string[]> {
   const primary = String(primaryDir ?? (await getModulesDirResolved())).trim()
@@ -434,7 +435,7 @@ export async function loadModules(
 
 export function moduleFilePath(moduleName: string, dir?: string): string {
   const base = dir ?? getModulesDir()
-  return Path.join(base, `${moduleName}.sgmodule`)
+  return base ? Path.join(base, `${moduleName}.sgmodule`) : ""
 }
 
 async function readModuleInfo(
@@ -471,6 +472,7 @@ async function readModuleInfo(
     localTag != null &&
     String(localTag).trim() !== "" &&
     !["0", "false", "no"].includes(String(localTag).trim().toLowerCase())
+  const hasLocalResourceRefs = /(?:^|[\\/])\.scripting-resources(?:[\\/]|$)/i.test(text)
   const isLocal = hasLocalTag || !link
   const category = parseTag(text, "category") ?? parseTag(text, "cagegory") ?? undefined
   const surgeName = parseTag(text, "name") ?? undefined
@@ -485,7 +487,7 @@ async function readModuleInfo(
     filePath: path,
     isLocal,
     localScripts: hasLocalScripts,
-    localResources: hasLocalResources || hasLocalScripts,
+    localResources: hasLocalResources || hasLocalScripts || hasLocalResourceRefs,
     ...(includeContent ? { content: text } : {}),
   }
 }
@@ -496,6 +498,7 @@ async function readModuleInfo(
  * iCloud directory walk can block an Intent for a long time.
  */
 export async function loadModuleAtPath(path: string): Promise<ModuleInfo | null> {
+  if (!String(path ?? "").trim()) return null
   if (!(await exists(path))) return null
   return readModuleInfo(path)
 }
@@ -515,6 +518,9 @@ export async function moveModuleFile(
   const name = String(nextName ?? (typeof target === "string" ? target : target.name)).trim()
   const baseDir = nextDir ?? Path.dirname(from)
   const to = moduleFilePath(name, baseDir)
+
+  await requireSurgeProfileDir(Path.dirname(from))
+  await requireSurgeProfileDir(baseDir)
 
   if (normalizePath(from) === normalizePath(to)) return to
   await ensureDir(baseDir)
@@ -620,6 +626,7 @@ export async function updateModuleMetadata(
   const fm = fmOrThrow()
   const path = resolveModulePath(target)
   if (!(await exists(path))) return
+  await requireSurgeProfileDir(Path.dirname(path))
   const raw = await fm.readAsString(path)
   let content = String(raw ?? "")
   content = upsertLink(content, getLinkPrefixes(), info.link)
@@ -649,6 +656,7 @@ export async function saveLocalModule(info: ModuleInfo, rawContent: string): Pro
   const fm = fmOrThrow()
   if (!fm?.writeAsString) throw new Error("FileManager.writeAsString 不可用")
   const targetDir = info.saveDir ?? (await getModulesDirResolved())
+  await requireSurgeProfileDir(targetDir)
   await ensureDir(targetDir)
   const path = moduleFilePath(info.name, targetDir)
   let content = String(rawContent ?? "")
@@ -662,6 +670,7 @@ export async function saveLocalModule(info: ModuleInfo, rawContent: string): Pro
 export async function listDirectSubDirs(baseDir?: string): Promise<string[]> {
   const fm = fmOrThrow()
   const root = await getModulesDirResolved(baseDir)
+  if (!root) return []
   const list = await fm.readDirectory(root)
   if (!Array.isArray(list)) return []
   const dirs: string[] = []

@@ -47,7 +47,15 @@ function isRemoteURL(value: string): boolean {
   return /^https?:\/\//i.test(String(value ?? "").trim())
 }
 
-function findScriptPathParameter(line: string): Omit<RemoteScriptPathReference, "lineIndex"> | null {
+function isLocalResourcePath(value: string): boolean {
+  return /(?:^|[\\/])\.scripting-resources(?:[\\/]|$)/i.test(String(value ?? "").trim())
+}
+
+function acceptsResourceValue(value: string, includeLocal: boolean): boolean {
+  return isRemoteURL(value) || (includeLocal && isLocalResourcePath(value))
+}
+
+function findScriptPathParameter(line: string, includeLocal = false): Omit<RemoteScriptPathReference, "lineIndex"> | null {
   // The modern declaration uses comma-separated key=value pairs. The legacy
   // form uses whitespace before the first parameter, so accept both without
   // matching a comment or a similarly named option.
@@ -60,7 +68,7 @@ function findScriptPathParameter(line: string): Omit<RemoteScriptPathReference, 
     const close = line.indexOf(first, valueStart + 1)
     if (close < 0) return null
     const value = line.slice(valueStart + 1, close).trim()
-    if (!isRemoteURL(value)) return null
+    if (!acceptsResourceValue(value, includeLocal)) return null
     return {
       start: valueStart,
       end: close + 1,
@@ -74,7 +82,7 @@ function findScriptPathParameter(line: string): Omit<RemoteScriptPathReference, 
   const segmentEnd = rawEnd < 0 ? rest.length : rawEnd
   const segment = rest.slice(0, segmentEnd)
   const value = segment.trim()
-  if (!isRemoteURL(value)) return null
+  if (!acceptsResourceValue(value, includeLocal)) return null
 
   const leading = segment.search(/\S/)
   if (leading < 0) return null
@@ -93,7 +101,7 @@ export function extractRemoteScriptPathReferences(content: string): RemoteScript
     .map(({ kind: _kind, ...reference }) => reference)
 }
 
-function findExternalSetReference(line: string): Omit<RemoteModuleResourceReference, "lineIndex"> | null {
+function findExternalSetReference(line: string, includeLocal = false): Omit<RemoteModuleResourceReference, "lineIndex"> | null {
   const match = /^\s*(RULE-SET|DOMAIN-SET)\s*,\s*/i.exec(line)
   if (!match) return null
   const kind = match[1].toLowerCase() === "rule-set" ? "ruleset" : "domainset"
@@ -103,14 +111,14 @@ function findExternalSetReference(line: string): Omit<RemoteModuleResourceRefere
     const close = line.indexOf(first, valueStart + 1)
     if (close < 0) return null
     const value = line.slice(valueStart + 1, close).trim()
-    if (!isRemoteURL(value)) return null
+    if (!acceptsResourceValue(value, includeLocal)) return null
     return { start: valueStart, end: close + 1, value, quote: first, kind }
   }
   const rest = line.slice(valueStart)
   const comma = rest.indexOf(",")
   const segment = comma < 0 ? rest : rest.slice(0, comma)
   const value = segment.trim()
-  if (!isRemoteURL(value)) return null
+  if (!acceptsResourceValue(value, includeLocal)) return null
   const leading = segment.search(/\S/)
   if (leading < 0) return null
   return {
@@ -122,7 +130,7 @@ function findExternalSetReference(line: string): Omit<RemoteModuleResourceRefere
   }
 }
 
-function findRemoteInclude(line: string): Omit<RemoteModuleResourceReference, "lineIndex"> | null {
+function findRemoteInclude(line: string, includeLocal = false): Omit<RemoteModuleResourceReference, "lineIndex"> | null {
   const match = /^\s*#!include\s+/i.exec(line)
   if (!match) return null
   const valueStart = match[0].length
@@ -131,11 +139,11 @@ function findRemoteInclude(line: string): Omit<RemoteModuleResourceReference, "l
     const close = line.indexOf(first, valueStart + 1)
     if (close < 0) return null
     const value = line.slice(valueStart + 1, close).trim()
-    if (!isRemoteURL(value)) return null
+    if (!acceptsResourceValue(value, includeLocal)) return null
     return { start: valueStart, end: close + 1, value, quote: first, kind: "include" }
   }
   const value = line.slice(valueStart).trim()
-  if (!isRemoteURL(value)) return null
+  if (!acceptsResourceValue(value, includeLocal)) return null
   return {
     start: valueStart + line.slice(valueStart).search(/\S/),
     end: valueStart + line.slice(valueStart).length,
@@ -178,6 +186,39 @@ export function extractRemoteModuleResourceReferences(content: string): RemoteMo
   return references
 }
 
+/** Find resources already rewritten into the local `.scripting-resources` tree. */
+export function extractLocalModuleResourceReferences(content: string): RemoteModuleResourceReference[] {
+  const lines = String(content ?? "").split(/\r?\n/g)
+  const references: RemoteModuleResourceReference[] = []
+  let inScriptSection = false
+
+  lines.forEach((line, lineIndex) => {
+    if (isScriptSection(line)) {
+      inScriptSection = true
+      return
+    }
+    if (isSectionHeader(line)) {
+      inScriptSection = false
+      return
+    }
+    if (/^\s*[#;]/.test(line)) {
+      const include = findRemoteInclude(line, true)
+      if (include && isLocalResourcePath(include.value)) references.push({ lineIndex, ...include })
+      return
+    }
+    if (inScriptSection) {
+      const script = findScriptPathParameter(line, true)
+      if (script && isLocalResourcePath(script.value)) references.push({ lineIndex, ...script, kind: "script" })
+    }
+    const set = findExternalSetReference(line, true)
+    if (set && isLocalResourcePath(set.value)) references.push({ lineIndex, ...set })
+    const include = findRemoteInclude(line, true)
+    if (include && isLocalResourcePath(include.value)) references.push({ lineIndex, ...include })
+  })
+
+  return references
+}
+
 /**
  * Rewrite selected remote script paths while preserving the rest of each line
  * and preserving quote style. `replacements` may be keyed by the original URL
@@ -195,9 +236,18 @@ export function rewriteRemoteModuleResources(
   replacements: Map<string, string> | Record<string, string>,
   kind?: RemoteModuleResourceReference["kind"],
 ): string {
-  const lines = String(content ?? "").split(/\r?\n/g)
   const refs = extractRemoteModuleResourceReferences(content)
     .filter((reference) => !kind || reference.kind === kind)
+  return rewriteModuleResourceReferences(content, refs, replacements)
+}
+
+/** Rewrite an explicit set of resource references, including local paths. */
+export function rewriteModuleResourceReferences(
+  content: string,
+  refs: RemoteModuleResourceReference[],
+  replacements: Map<string, string> | Record<string, string>,
+): string {
+  const lines = String(content ?? "").split(/\r?\n/g)
   const byLine = new Map<number, RemoteModuleResourceReference[]>()
   for (const ref of refs) {
     const list = byLine.get(ref.lineIndex) ?? []

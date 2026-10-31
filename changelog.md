@@ -1,5 +1,12 @@
 # 更新日志
 
+## v4.2.11
+
+- 按 Surge 官方模块/脚本文档修正存储根目录：设置中选择的 `iCloud Drive/Surge` 配置目录就是实际写入目录，不再自动创建、猜测或回退到私有 `Module` 目录。
+- 所有模块写入、Script-Hub 导入、批量分享、元数据导入和本地资源写入都增加硬路径校验；没有有效 Surge 书签时直接失败，不会出现“提示成功但 Surge 看不到”的假成功。
+- 修复子目录模块的 `Invalid Local Resource`：资源仍跟随模块落盘，但 `script-path`、`RULE-SET`、`DOMAIN-SET` 和 `#!include` 会改写为相对于 Surge 配置根目录的完整路径；兼容修复旧版本已生成的 `.scripting-resources` 引用。
+- 批量更新和单模块本地化优先处理当前 Surge 文件，不会因为模块已有 `#!url` 就盲目重新拉取并覆盖本地模块。
+
 ## v4.2.10
 
 - 修复自动使用 `Surge/Module` 后旧模块显示为 0 的问题：兼容扫描 `iCloud/Surge` 根目录和 `Surge/Module`，不会因为目录规则升级而让已有模块消失。

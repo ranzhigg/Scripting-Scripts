@@ -9,6 +9,7 @@ import {
   getModulesDirResolved,
   getSurgeBookmarkRoot,
   isPathWithin,
+  requireSurgeProfileDir,
 } from "./storage"
 import { downloadWithProgress } from "./stream_downloader"
 import { validateSurgeModuleText } from "./module_validation"
@@ -31,16 +32,16 @@ export type DownloadModuleOptions = {
 const FETCH_TIMEOUT_MS = 30 * 1000
 const FILE_OPERATION_TIMEOUT_MS = 15 * 1000
 
-async function requireSurgeLocalizationRoot(profileDir: string | undefined, targetDir: string): Promise<string> {
+async function requireSurgeProfileRoot(profileDir: string | undefined, targetDir: string): Promise<string> {
   const modulesRoot = await getSurgeBookmarkRoot()
   if (!modulesRoot) {
-    throw new Error("本地化资源必须写入 iCloud/Surge/Module，请先在设置中选择有效的 Surge 书签文件夹")
+    throw new Error("模块必须写入已授权的 iCloud Drive/Surge 配置目录，请先在设置中选择有效的 Surge 书签文件夹")
   }
   if (profileDir && !isPathWithin(modulesRoot, profileDir)) {
     throw new Error("本地化资源根目录不在 iCloud/Surge 书签范围内，请重新选择 Surge 文件夹")
   }
   if (!isPathWithin(modulesRoot, targetDir)) {
-    throw new Error("模块目标目录不在 Surge iCloud 书签内，已拒绝写入本地资源")
+    throw new Error("模块目标目录不在 iCloud Drive/Surge 书签内，已拒绝写入")
   }
   return modulesRoot
 }
@@ -201,15 +202,14 @@ async function writeFinalModule(
   const preparedContent = prepareModuleText(rawText, info)
   const path = moduleFilePath(info.name, targetDir)
   const shouldLocalize = (options.localizeResources ?? loadConfig().localizeScriptsOnDownload) || !!info.localResources || !!info.localScripts
-  // Validate the selected iCloud/Surge bookmark first. Resources themselves
-  // are kept beside the module in the actual `Surge/Module` directory, so the
-  // module can use the stable `.scripting-resources/...` relative path that
-  // Surge shows for local module resources.
-  if (shouldLocalize) {
-    await requireSurgeLocalizationRoot(options.profileDir, targetDir)
-  }
+  // Every write is guarded, even when resource localization is disabled. This
+  // prevents a missing/stale bookmark from silently sending a module to
+  // Scripting's private documents directory.
+  const profileDir = shouldLocalize
+    ? await requireSurgeProfileRoot(options.profileDir, targetDir)
+    : await requireSurgeProfileRoot(options.profileDir ?? (await getModulesDirResolved()), targetDir)
   const localized = shouldLocalize
-    ? await localizeModuleResources(preparedContent, info, path, targetDir)
+    ? await localizeModuleResources(preparedContent, info, path, profileDir)
     : null
   const content = localized?.content ?? preparedContent
 
@@ -262,11 +262,11 @@ export async function writeModuleText(
       : validateSurgeModuleText(rawText)
     const path = moduleFilePath(info.name, targetDir)
     const shouldLocalize = (options.localizeResources ?? loadConfig().localizeScriptsOnDownload) || !!info.localResources || !!info.localScripts
-    if (shouldLocalize) {
-      await requireSurgeLocalizationRoot(options.profileDir, targetDir)
-    }
+    const profileDir = shouldLocalize
+      ? await requireSurgeProfileRoot(options.profileDir, targetDir)
+      : await requireSurgeProfileRoot(options.profileDir ?? (await getModulesDirResolved()), targetDir)
     const localized = shouldLocalize
-      ? await localizeModuleResources(preparedContent, info, path, targetDir)
+      ? await localizeModuleResources(preparedContent, info, path, profileDir)
       : null
     const content = localized?.content ?? preparedContent
     try {
@@ -358,7 +358,9 @@ export async function downloadModule(
   }
 
   const targetDir = info.saveDir ?? (await getModulesDirResolved())
-  const profileDir = options.profileDir ?? await getModulesDirResolved()
+  // Validate before fetching. A failed/stale bookmark must never cause a
+  // network request followed by a write into the Scripting private folder.
+  const profileDir = await requireSurgeProfileDir(targetDir)
   const localizeResources = (options.localizeResources ?? loadConfig().localizeScriptsOnDownload) || !!info.localResources || !!info.localScripts
   try {
     let result: { path: string; localizedResources: number }

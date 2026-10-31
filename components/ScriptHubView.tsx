@@ -927,7 +927,7 @@ export function ScriptHubView(props: { onImported?: () => void; tag?: number; ta
       if (!scriptingScriptName.trim()) {
         await Dialog.alert({
           title: "需要填写脚本名",
-          message: "请填写 Scripting 中显示的脚本名；首次使用还要在该脚本设置里授权 iCloud/Surge 文件夹。",
+          message: "请填写 Scripting 中显示的脚本名；首次使用还要在该脚本设置里授权 iCloud/Surge 配置目录。",
         })
         return
       }
@@ -1620,7 +1620,7 @@ export function ScriptHubView(props: { onImported?: () => void; tag?: number; ta
               </Text>
               <TextField label={<Text>Scripting 脚本名</Text>} value={scriptingScriptName} onChanged={setScriptingScriptName} prompt="填写 Scripting 中显示的脚本名" />
               <Text font="caption" foregroundStyle="secondaryLabel" lineLimit={3}>
-                首次使用 Scripting 导入前，请先在对应脚本设置里授权 iCloud/Surge 文件夹；模块会自动写入其中的 Module 子目录。
+                首次使用 Scripting 导入前，请先在对应脚本设置里授权 iCloud/Surge 配置目录；模块会直接写入该目录。
               </Text>
             </DisclosureGroup>
           ) : null}

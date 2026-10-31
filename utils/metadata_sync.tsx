@@ -8,6 +8,7 @@ import {
   getModulesDirResolved,
   loadModules,
   moduleFilePath,
+  requireSurgeProfileDir,
   updateModuleMetadata,
   type ModuleInfo,
 } from "./storage"
@@ -250,6 +251,7 @@ function placeholderContent(item: MetadataModule): string {
 async function savePlaceholderModule(item: MetadataModule, targetDir: string): Promise<void> {
   const fm = fmOrThrow()
   if (!fm?.writeAsString) throw new Error("FileManager.writeAsString 不可用")
+  await requireSurgeProfileDir(targetDir)
   await ensureDir(targetDir)
   await fm.writeAsString(moduleFilePath(item.name, targetDir), placeholderContent(item))
 }

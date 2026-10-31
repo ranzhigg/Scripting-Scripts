@@ -2,8 +2,10 @@ import { Path } from "scripting"
 
 import { withTimeout } from "./async"
 import {
+  extractLocalModuleResourceReferences,
   extractRemoteModuleResourceReferences,
   relativeProfilePath,
+  rewriteModuleResourceReferences,
   rewriteRemoteModuleResources,
   type RemoteModuleResourceReference,
 } from "./script_localizer_core"
@@ -221,6 +223,61 @@ async function rollbackChanges(changes: FileChange[]): Promise<void> {
 }
 
 /**
+ * Repair local references produced by older builds.
+ *
+ * Resources are intentionally stored beside their module, but Surge resolves
+ * the reference from the selected profile directory. A module in
+ * `Module/BoxJs.sgmodule` therefore needs `Module/.scripting-resources/...`
+ * in its text. Older builds wrote only `.scripting-resources/...`, which is
+ * why Surge reported Invalid Local Resource even though the files existed.
+ */
+async function rebaseExistingLocalResourcePaths(
+  content: string,
+  modulePath: string,
+  profileDir?: string,
+): Promise<string> {
+  const references = extractLocalModuleResourceReferences(content)
+  if (!references.length) return content
+
+  const moduleDir = Path.dirname(modulePath)
+  const rootDir = profileDir || moduleDir
+  const replacements = new Map<string, string>()
+
+  for (const reference of references) {
+    const value = String(reference.value ?? "").trim()
+    const candidates = value.startsWith("/")
+      ? [value]
+      : [
+          // Older localizer versions placed the resource tree beside the
+          // module and wrote a path relative to the module directory.
+          Path.join(moduleDir, value),
+          // v4.2.9 briefly placed resources under a guessed `Surge/Module`
+          // child while the selected bookmark was the `Surge` root.
+          Path.join(rootDir, "Module", value),
+          Path.join(rootDir, "Modules", value),
+          // Newer files may already contain a profile-root-relative path.
+          Path.join(rootDir, value),
+        ]
+    let physicalPath = ""
+    for (const candidate of candidates) {
+      if (await exists(candidate)) {
+        physicalPath = candidate
+        break
+      }
+    }
+    if (!physicalPath) continue
+
+    const relative = relativeProfilePath(rootDir, physicalPath)
+    if (relative && relative !== value) {
+      replacements.set(`${reference.kind}:${value}`, relative)
+    }
+  }
+
+  if (!replacements.size) return content
+  return rewriteModuleResourceReferences(content, references, replacements)
+}
+
+/**
  * Download all remote module resources and return module text pointing to
  * local files. The caller owns the returned rollback callback and should call
  * it if the enclosing module write fails.
@@ -229,15 +286,21 @@ export async function localizeModuleResources(
   content: string,
   info: Pick<ModuleInfo, "name">,
   modulePath: string,
-  moduleDir?: string,
+  profileDir?: string,
 ): Promise<ScriptLocalizationResult> {
-  const references = extractRemoteModuleResourceReferences(content)
+  // First repair paths already pointing at `.scripting-resources`. This path
+  // is deliberately offline: a local module should not be re-fetched merely
+  // because its resource references were written using the wrong base.
+  const rebasedContent = await rebaseExistingLocalResourcePaths(content, modulePath, profileDir)
+  const references = extractRemoteModuleResourceReferences(rebasedContent)
   if (!references.length) {
-    const hasLocalizationMarker = /^\s*#!\s*(?:local-resources|local-scripts)\s*=/im.test(content)
+    const hasLocalizationMarker =
+      /^\s*#!\s*(?:local-resources|local-scripts)\s*=/im.test(rebasedContent) ||
+      extractLocalModuleResourceReferences(rebasedContent).length > 0
     return {
       // A beta build used `#!local-scripts`; normalize that marker even when
       // all resource references have already been rewritten locally.
-      content: hasLocalizationMarker ? upsertLocalResourcesTag(content) : content,
+      content: hasLocalizationMarker ? upsertLocalResourcesTag(rebasedContent) : rebasedContent,
       localizedCount: 0,
       scriptCount: 0,
       ruleSetCount: 0,
@@ -251,10 +314,10 @@ export async function localizeModuleResources(
   const uniqueResources = Array.from(
     new Map(references.map((ref) => [`${ref.kind}:${ref.value}`, ref])).values(),
   )
-  // Keep the reference relative to the directory containing the module. The
-  // manager's external bookmark is `iCloud/Surge`, while the actual module
-  // directory is `iCloud/Surge/Module` (or a subdirectory below it).
-  const rootDir = moduleDir || Path.dirname(modulePath)
+  // Surge resolves local resource fields against the selected profile
+  // directory. Keep resources beside the module, but include any module
+  // subdirectory in the reference written into the module text.
+  const rootDir = profileDir || Path.dirname(modulePath)
   const replacements = new Map<string, string>()
   const changes: FileChange[] = []
 
@@ -289,7 +352,7 @@ export async function localizeModuleResources(
     )
 
     return {
-      content: upsertLocalResourcesTag(rewriteRemoteModuleResources(content, replacements)),
+      content: upsertLocalResourcesTag(rewriteRemoteModuleResources(rebasedContent, replacements)),
       localizedCount: uniqueResources.length,
       ...counts,
       resourceURLs: uniqueResources.map((reference) => reference.value),
