@@ -494,6 +494,11 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
     return m.filePath || `${m.name}-${m.link}`
   }
 
+  function isConverterModuleLink(link: string): boolean {
+    const value = String(link ?? "")
+    return /https?:\/\/script\.hub(?:\/|$)|_start_|_end_|[?&]type=(?:surge-module|loon-plugin|qx-rewrite|all-module)(?:&|$)/i.test(value)
+  }
+
   function dirName(path: string): string {
     const normalized = String(path ?? "").replace(/\/+$/, "")
     return normalized.split("/").pop() || normalized || "根目录"
@@ -541,6 +546,18 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
 
   async function syncMetadataIfNeeded() {
     await autoExportMetadataToICloud(cfg)
+  }
+
+  async function readInstalledModuleText(target: ModuleInfo): Promise<string | undefined> {
+    const path = target.filePath
+    const fm: any = (globalThis as any).FileManager
+    if (!path || !fm?.readAsString) return undefined
+    try {
+      const content = String(await fm.readAsString(path) ?? "")
+      return content.trim() ? content : undefined
+    } catch {
+      return undefined
+    }
   }
 
   async function syncLocalizationSetting(enabled: boolean) {
@@ -1212,7 +1229,8 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
       // those writes serial so iCloud does not deliver a burst of profile
       // changes that looks like a reload loop to Surge.
       const configuredConcurrency = Math.max(1, Math.min(cfg.downloadConcurrency || 3, total))
-      const concurrency = sourceContents ? 1 : configuredConcurrency
+      const localizeEnabled = loadConfig().localizeScriptsOnDownload
+      const concurrency = sourceContents || localizeEnabled ? 1 : configuredConcurrency
 
       const updateOverallProgress = () => {
         setStage(`下载中：已完成 ${completed}/${total}`)
@@ -1229,13 +1247,37 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
 
           const m = downloadable[idx]
           const linkPrefix = await detectLinkPrefix(m)
-          const sourceContent = sourceContents?.get(moduleKey(m))
-          const res = await downloadModule(
-            { ...m, saveDir: inferSaveDir(m), linkPrefix },
+          let sourceContent = sourceContents?.get(moduleKey(m))
+          // A converter URL is not a stable module download endpoint. When
+          // the installed module already has local resources, use its current
+          // text first and only fall back to the URL if that text cannot be
+          // read from the selected Surge bookmark.
+          if (sourceContent === undefined && localizeEnabled && isConverterModuleLink(m.link)) {
+            sourceContent = await readInstalledModuleText(m)
+          }
+          const downloadInfo = { ...m, saveDir: inferSaveDir(m), linkPrefix }
+          let res = await downloadModule(
+            downloadInfo,
             sourceContent === undefined
               ? undefined
-              : { content: sourceContent, localizeResources: loadConfig().localizeScriptsOnDownload },
+              : { content: sourceContent, localizeResources: localizeEnabled },
           )
+
+          // Some `#!url` values are converter endpoints rather than direct
+          // Surge module downloads. If the remote response is invalid, keep
+          // the installed module as the source and repair/localize it
+          // offline. This is what makes Update All safe for boxjs and similar
+          // Script-Hub-generated modules.
+          if (!res.ok && sourceContent === undefined && localizeEnabled) {
+            sourceContent = await readInstalledModuleText(m)
+            if (sourceContent !== undefined) {
+              const fallback = await downloadModule(
+                downloadInfo,
+                { content: sourceContent, localizeResources: true },
+              )
+              if (fallback.ok) res = fallback
+            }
+          }
           if (res.ok) {
             okCount += 1
             localizedResourceCount += res.localizedResources ?? 0
