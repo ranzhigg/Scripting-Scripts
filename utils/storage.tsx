@@ -223,9 +223,10 @@ export async function ensureStorage(): Promise<void> {
     if (!root) {
       throw new Error("书签路径不可用，请在设置页重新选择书签文件夹")
     }
-    // The selected bookmark is the security boundary. Modules and their
-    // resources are written into its real `Module` child; never use Scripting's
-    // private documents directory as a fallback.
+    // The selected bookmark is the security boundary. Module files are
+    // written into its real `Module` child; localized scripts use the sibling
+    // `Script` directory and other resources use the profile root. Never use
+    // Scripting's private documents directory as a fallback.
     await ensureDir(root)
     await ensureDir(surgeModuleDirectory(root))
     return

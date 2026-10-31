@@ -1,5 +1,11 @@
 # 更新日志
 
+## v4.2.20
+
+- 调整脚本资源目录：下载的 `[Script]` 资源统一写入 `iCloud Drive/Surge/Script`，模块文件继续写入原来的 `Surge/Module`，不移动模块。
+- 同步所有模块的 `script-path` 为 `Script/<文件名>`，并在写入后校验它与 `Surge/Script/<文件名>` 完全一致；规则集和 include 仍按原有根目录规则处理。
+- 迁移旧根目录、隐藏 `.scripting-resources` 和旧 `Scripts/...` 中的脚本到 `Script` 目录，保留文件名并同步改写模块路径，不依赖个别脚本名称。
+
 ## v4.2.19
 
 - 同步本地化目录约定：模块继续写入 `Surge/Module`，脚本、规则集和 include 资源直接写入 `Surge` 根目录，模块内使用根目录裸文件名，不再生成 `Offline/...`、`Scripts/...` 或隐藏目录路径。

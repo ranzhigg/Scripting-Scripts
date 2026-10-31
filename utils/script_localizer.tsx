@@ -75,6 +75,26 @@ function kindDirectory(kind: RemoteModuleResourceReference["kind"]): string {
   return kind === "script" ? "scripts" : kind === "include" ? "includes" : "rulesets"
 }
 
+/**
+ * Canonical visible resource directory inside the selected Surge profile.
+ * JavaScript resources live in `Surge/Script`; rule sets and includes keep
+ * their existing root-level layout. Module files themselves are never moved.
+ */
+function resourceDirectory(kind: RemoteModuleResourceReference["kind"]): string {
+  return kind === "script" ? "Script" : ""
+}
+
+function resourcePath(
+  resourceRoot: string,
+  fileName: string,
+  kind: RemoteModuleResourceReference["kind"],
+): string {
+  const directory = resourceDirectory(kind)
+  return directory
+    ? Path.join(resourceRoot, directory, fileName)
+    : Path.join(resourceRoot, fileName)
+}
+
 function resourceFileName(url: string, kind: RemoteModuleResourceReference["kind"]): string {
   const fallback = kind === "script" ? "script.js" : kind === "include" ? "include.conf" : "rules.list"
   let last = fallback
@@ -235,6 +255,7 @@ async function findLegacyResourcePath(
   const candidates = [
     ...legacyResourceDirectories(resourceRoot, modulePath, moduleName, kind)
       .map((directory) => Path.join(directory, legacyName)),
+    resourcePath(resourceRoot, legacyName, kind),
     Path.join(resourceRoot, legacyName),
     Path.join(Path.dirname(modulePath), legacyName),
   ]
@@ -334,11 +355,11 @@ async function rollbackChanges(changes: FileChange[]): Promise<void> {
  * and `#!include` values from the Surge profile root. The only layout that is
  * reliably discovered by both Surge and Files is therefore:
  *
- *   Surge/timecard.js
- *   Surge/Module/Offline/timecard.sgmodule  ->  script-path=timecard.js
+ *   Surge/Script/timecard.js
+ *   Surge/Module/Offline/timecard.sgmodule  ->  script-path=Script/timecard.js
  *
  * Migrate hidden `.scripting-resources`, the intermediate `Scripts/...` tree,
- * and old hash-suffixed root files into that canonical root-level layout.
+ * and old hash-suffixed root files into that canonical visible layout.
  */
 async function rebaseExistingLocalResourcePaths(
   content: string,
@@ -371,8 +392,9 @@ async function rebaseExistingLocalResourcePaths(
       candidates.push(candidate)
     }
 
-    // Search the actual Surge root first for the current root-level layout,
-    // then the module/profile directories used by previous builds.
+    // Search the canonical visible resource directory first, then the old
+    // root-level and module/profile directories used by previous builds.
+    add(resourcePath(rootDir, pathBaseName(value), kind))
     add(Path.join(rootDir, value))
     add(Path.join(moduleDir, value))
     add(Path.join(moduleRoot, value))
@@ -406,12 +428,14 @@ async function rebaseExistingLocalResourcePaths(
     }
     if (!physicalPath) continue
 
-    // Always canonicalize an existing local reference into the Surge root.
-    // This handles hidden legacy paths, the intermediate Scripts tree, and
-    // the hash-suffixed root files shown in the Files screenshots.
-    const visiblePath = Path.join(
+    // Always canonicalize an existing local reference into the visible
+    // resource directory. Scripts move to Surge/Script; the module file is
+    // never moved. This handles hidden legacy paths, the intermediate
+    // Scripts tree, and old hash-suffixed root files.
+    const visiblePath = resourcePath(
       rootDir,
       migratedResourceFileName(physicalPath, reference.kind, value),
+      reference.kind,
     )
     const previousSource = targetSources.get(visiblePath)
     if (previousSource && previousSource !== physicalPath) {
@@ -515,7 +539,11 @@ export async function localizeModuleResources(
 
   try {
     for (const reference of uniqueResources) {
-      const filePath = Path.join(rootDir, resourceFileName(reference.value, reference.kind))
+      const filePath = resourcePath(
+        rootDir,
+        resourceFileName(reference.value, reference.kind),
+        reference.kind,
+      )
       const previousURL = targetURLs.get(filePath)
       if (previousURL && previousURL !== reference.value) {
         throw new Error(`远程资源文件名冲突：${pathBaseName(filePath)}（${previousURL} 与 ${reference.value}）`)

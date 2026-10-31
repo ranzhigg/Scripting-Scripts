@@ -21,8 +21,8 @@ export type RemoteModuleResourceReference = RemoteScriptPathReference & {
 /**
  * Return a path suitable for Surge's root-relative resource fields.
  * Keeping this pure makes the iCloud rule explicit and testable: localized
- * resources live in `Surge/`, so a module under `Module/Providers/` references
- * the root basename such as `timecard.js`.
+ * resources are referenced relative to the Surge profile root: scripts use
+ * `Script/<basename>` while rule sets and includes keep their root basename.
  */
 export function relativeProfilePath(profileDir: string, targetPath: string): string {
   const from = String(profileDir ?? "").replace(/\\/g, "/").replace(/\/+$/, "")
@@ -56,7 +56,7 @@ function isLocalResourcePath(value: string): boolean {
   if (!normalized) return false
   if (isRemoteURL(normalized)) return false
   if (/(?:^|[\\/])(?:\.scripting-resources|Scripts)(?:[\\/]|$)/i.test(normalized)) return true
-  // Root-level local resources are normally `timecard.js`, `ads.list`, or
+  // Local resources are normally `Script/timecard.js`, `ads.list`, or
   // `common.conf`. Accept a relative filename/path with an extension so an
   // already-localized module can be migrated without downloading it again.
   return !normalized.startsWith("/") && !normalized.includes("://") &&
