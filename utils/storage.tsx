@@ -670,22 +670,6 @@ export async function updateModuleMetadata(
   await fm.writeAsString(path, content)
 }
 
-export async function saveLocalModule(info: ModuleInfo, rawContent: string): Promise<void> {
-  await ensureStorage()
-  const fm = fmOrThrow()
-  if (!fm?.writeAsString) throw new Error("FileManager.writeAsString 不可用")
-  const targetDir = info.saveDir ?? (await getModulesDirResolved())
-  await requireSurgeProfileDir(targetDir)
-  await ensureDir(targetDir)
-  const path = moduleFilePath(info.name, targetDir)
-  let content = String(rawContent ?? "")
-  content = upsertTag(content, "local", "true")
-  if (info.sourceURL !== undefined) content = upsertTag(content, "source-url", info.sourceURL)
-  if (info.category !== undefined) content = upsertTag(content, "category", info.category)
-  await backupModulePath(path)
-  await fm.writeAsString(path, content)
-}
-
 export async function listDirectSubDirs(baseDir?: string): Promise<string[]> {
   const fm = fmOrThrow()
   const root = await getModulesDirResolved(baseDir)

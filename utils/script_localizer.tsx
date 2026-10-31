@@ -165,8 +165,8 @@ function migratedResourceFileName(
   referenceValue?: string,
 ): string {
   // The module's current reference is authoritative. In particular,
-  // `chavy.boxjs-71ef70c1.js` is a real resource name, not a suffix that may
-  // be stripped: Surge must see the exact same basename in the profile root.
+  // a hash-suffixed resource name is still a real resource name, not a suffix
+  // that may be stripped: Surge must see the exact same basename in the root.
   const referencedBase = pathBaseName(referenceValue ?? "")
   if (referencedBase && /\.[A-Za-z0-9]{1,16}$/.test(referencedBase)) {
     return safeFileName(referencedBase, resourceFileName(path, kind))
@@ -176,6 +176,95 @@ function migratedResourceFileName(
     return safeFileName(base, resourceFileName(path, kind))
   }
   return resourceFileName(path, kind)
+}
+
+function metadataURLValues(content: string, key: string): string[] {
+  const values: string[] = []
+  const pattern = new RegExp(`^\\s*#!\\s*${key}\\s*=\\s*(\\S.*?)\\s*$`, "im")
+  for (const line of String(content ?? "").split(/\r?\n/g)) {
+    const match = pattern.exec(line)
+    if (!match) continue
+    const value = match[1].trim().replace(/^['"]|['"]$/g, "")
+    if (value) values.push(value)
+  }
+  return values
+}
+
+/**
+ * Recover the source module behind a Script-Hub-style `/_start_/_end_`
+ * wrapper. A localized module may only retain a local filename in
+ * `script-path`; the source module is still enough to recover a missing file
+ * without hard-coding a particular third-party script.
+ */
+function moduleSourceCandidates(content: string): string[] {
+  const candidates: string[] = []
+  const add = (value: string) => {
+    let fixed = String(value ?? "").trim()
+    if (!fixed) return
+    try { fixed = decodeURIComponent(fixed) } catch {}
+    if (!/^https?:\/\//i.test(fixed) || candidates.includes(fixed)) return
+    candidates.push(fixed)
+  }
+
+  for (const value of [
+    ...metadataURLValues(content, "source-url"),
+    ...metadataURLValues(content, "url"),
+  ]) {
+    const endMarker = "/_end_/"
+    const endIndex = value.indexOf(endMarker)
+    if (endIndex >= 0) {
+      let source = value.slice(0, endIndex)
+      const startMarker = "/_start_/"
+      const startIndex = source.lastIndexOf(startMarker)
+      if (startIndex >= 0) source = source.slice(startIndex + startMarker.length)
+      // Prefer the unwrapped upstream module so a converter endpoint cannot
+      // stall recovery before the actual source is tried.
+      add(source)
+    }
+    add(value)
+  }
+  return candidates
+}
+
+function resourceStem(value: string): string {
+  return pathBaseName(value)
+    .toLowerCase()
+    .replace(/\.[a-z0-9]{1,16}$/i, "")
+    .replace(/-[0-9a-f]{8,}$/i, "")
+}
+
+function chooseRecoveryReference(
+  localReference: RemoteModuleResourceReference,
+  remoteReferences: RemoteModuleResourceReference[],
+): RemoteModuleResourceReference | undefined {
+  const candidates = remoteReferences.filter((reference) => reference.kind === localReference.kind)
+  if (!candidates.length) return undefined
+  const localBase = pathBaseName(localReference.value).toLowerCase()
+  const localStem = resourceStem(localReference.value)
+  const ranked = [...candidates].sort((left, right) => {
+    const leftBase = pathBaseName(left.value).toLowerCase()
+    const rightBase = pathBaseName(right.value).toLowerCase()
+    const leftScore = leftBase === localBase
+      ? 3
+      : resourceStem(left.value) === localStem
+        ? 2
+        : candidates.length === 1 ? 1 : 0
+    const rightScore = rightBase === localBase
+      ? 3
+      : resourceStem(right.value) === localStem
+        ? 2
+        : candidates.length === 1 ? 1 : 0
+    return rightScore - leftScore
+  })
+  const best = ranked[0]
+  if (!best) return undefined
+  const bestBase = pathBaseName(best.value).toLowerCase()
+  const bestScore = bestBase === localBase
+    ? 3
+    : resourceStem(best.value) === localStem
+      ? 2
+      : candidates.length === 1 ? 1 : 0
+  return bestScore > 0 ? best : undefined
 }
 
 async function exists(path: string): Promise<boolean> {
@@ -464,6 +553,88 @@ async function rebaseExistingLocalResourcePaths(
   return rewriteModuleResourceReferences(content, references, replacements)
 }
 
+type LocalResourceRecoveryResult = {
+  content: string
+  recoveredCount: number
+}
+
+/**
+ * Repair a module that claims to be localized but has lost one or more of its
+ * local files. This is intentionally source-driven and generic: it unwraps
+ * the original module URL, matches the source resource by kind/basename, and
+ * writes it using the filename already present in the local module.
+ */
+async function recoverMissingLocalResources(
+  content: string,
+  rootDir: string,
+  changes: FileChange[],
+): Promise<LocalResourceRecoveryResult> {
+  const references = extractLocalModuleResourceReferences(content)
+  const missing: RemoteModuleResourceReference[] = []
+  for (const [index, reference] of references.entries()) {
+    const first = references.findIndex((item) => (
+      item.kind === reference.kind && item.value === reference.value
+    ))
+    if (first !== index) continue
+    const value = String(reference.value ?? "").trim()
+    const path = value.startsWith("/") ? value : Path.join(rootDir, value)
+    if (!(await resourceFileExists(path))) missing.push(reference)
+  }
+  if (!missing.length) return { content, recoveredCount: 0 }
+
+  let sourceReferences: RemoteModuleResourceReference[] = []
+  for (const sourceURL of moduleSourceCandidates(content)) {
+    try {
+      const sourceText = await fetchResourceText(sourceURL)
+      const parsed = extractRemoteModuleResourceReferences(sourceText)
+      if (parsed.length) {
+        sourceReferences = parsed
+        break
+      }
+    } catch {}
+  }
+  if (!sourceReferences.length) return { content, recoveredCount: 0 }
+
+  const resourceTexts = new Map<string, string>()
+  const targetURLs = new Map<string, string>()
+  const replacements = new Map<string, string>()
+  let recoveredCount = 0
+  for (const localReference of missing) {
+    const remoteReference = chooseRecoveryReference(localReference, sourceReferences)
+    if (!remoteReference) continue
+    const filePath = resourcePath(
+      rootDir,
+      migratedResourceFileName(remoteReference.value, localReference.kind, localReference.value),
+      localReference.kind,
+    )
+    const previousURL = targetURLs.get(filePath)
+    if (previousURL && previousURL !== remoteReference.value) {
+      throw new Error("恢复资源文件名冲突：" + pathBaseName(filePath) + "（" + previousURL + " 与 " + remoteReference.value + "）")
+    }
+    targetURLs.set(filePath, remoteReference.value)
+    let resourceText = resourceTexts.get(remoteReference.value)
+    if (resourceText === undefined) {
+      resourceText = await fetchResourceText(remoteReference.value)
+      resourceTexts.set(remoteReference.value, resourceText)
+    }
+    const current = await (async () => {
+      if (!(await resourceFileExists(filePath))) return undefined
+      try { return await readString(filePath) } catch { return undefined }
+    })()
+    if (current !== resourceText) changes.push(await writeResourceFile(filePath, resourceText))
+    const relative = relativeProfilePath(rootDir, filePath)
+    replacements.set(`${localReference.kind}:${localReference.value}`, relative)
+    recoveredCount += 1
+  }
+
+  return {
+    content: replacements.size
+      ? rewriteModuleResourceReferences(content, references, replacements)
+      : content,
+    recoveredCount,
+  }
+}
+
 export type LocalResourcePathSyncResult = {
   content: string
   migratedCount: number
@@ -471,27 +642,30 @@ export type LocalResourcePathSyncResult = {
 }
 
 /**
- * Synchronize paths for resources that are already local without fetching any
- * remote resource. This is intentionally separate from full localization so
- * turning the download switch off does not prevent old root-level script
- * references from being moved to `Script/<filename>`.
+ * Synchronize paths for resources that are already local. By default this is
+ * offline; callers may explicitly enable recovery for a module that claims to
+ * be localized but has lost one of its files.
  */
 export async function syncLocalModuleResourcePaths(
   content: string,
   _info: Pick<ModuleInfo, "name">,
   modulePath: string,
   resourceRoot?: string,
+  options: { recoverMissingResources?: boolean } = {},
 ): Promise<LocalResourcePathSyncResult> {
   const changes: FileChange[] = []
   const rootDir = String(resourceRoot ?? "").trim() || inferResourceRoot(modulePath)
   try {
-    const rebasedContent = await rebaseExistingLocalResourcePaths(
+    let rebasedContent = await rebaseExistingLocalResourcePaths(
       content,
       modulePath,
       _info.name,
       rootDir,
       changes,
     )
+    if (options.recoverMissingResources) {
+      rebasedContent = (await recoverMissingLocalResources(rebasedContent, rootDir, changes)).content
+    }
     const localReferences = extractLocalModuleResourceReferences(rebasedContent)
     if (localReferences.length) await verifyLocalResourcePaths(rebasedContent, rootDir)
     return {
@@ -550,6 +724,15 @@ export async function localizeModuleResources(
     await rollbackChanges(changes)
     throw new Error(`模块资源迁移失败：${String((error as any)?.message ?? error)}`)
   }
+  let recoveredCount = 0
+  try {
+    const recovered = await recoverMissingLocalResources(rebasedContent, rootDir, changes)
+    rebasedContent = recovered.content
+    recoveredCount = recovered.recoveredCount
+  } catch (error) {
+    await rollbackChanges(changes)
+    throw new Error(`缺失本地资源恢复失败：${String((error as any)?.message ?? error)}`)
+  }
   const references = extractRemoteModuleResourceReferences(rebasedContent)
   if (!references.length) {
     const hasLocalizationMarker =
@@ -562,7 +745,7 @@ export async function localizeModuleResources(
       // A beta build used `#!local-scripts`; normalize that marker even when
       // all resource references have already been rewritten locally.
       content: hasLocalizationMarker ? upsertLocalResourcesTag(rebasedContent) : rebasedContent,
-      localizedCount: 0,
+      localizedCount: recoveredCount,
       scriptCount: 0,
       ruleSetCount: 0,
       domainSetCount: 0,
@@ -637,7 +820,7 @@ export async function localizeModuleResources(
     }
     return {
       content: localizedContent,
-      localizedCount: uniqueResources.length,
+      localizedCount: uniqueResources.length + recoveredCount,
       ...counts,
       resourceURLs: uniqueResources.map((reference) => reference.value),
       rollback: () => rollbackChanges(changes),

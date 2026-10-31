@@ -34,7 +34,6 @@ import {
   type ModuleInfo,
   updateModuleMetadata,
   listDirectSubDirs,
-  saveLocalModule,
   getModulesDirResolved,
   moveModuleFile,
 } from "../utils/storage"
@@ -570,7 +569,7 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
         const cached = new Map<string, string>()
         for (const item of remoteModules) {
           // Localize the module that is actually installed. Do not fetch the
-          // `#!url` again: converter links such as boxjs/script.hub may return
+          // `#!url` again: converter links may return
           // a script or a transient response instead of a Surge module.
           if (!item.filePath) continue
           try {
@@ -590,7 +589,10 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
       remoteModules,
       enabled ? "开启本地化：同步现有模块…" : "关闭本地化：切回远程引用…",
       sourceContents,
-      { preferInstalledConverterSources: enabled },
+      {
+        preferInstalledConverterSources: enabled,
+        repairMissingLocalResources: enabled,
+      },
     )
   }
 
@@ -961,10 +963,17 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
         : (target.filePath ?? moduleFilePath(finalName, finalSaveDir))
 
       if (merged.isLocal || !merged.link) {
-        await saveLocalModule(
+        const result = await writeModuleText(
           { ...merged, name: finalName, saveDir: finalSaveDir, filePath: finalFilePath },
-          merged.content ?? ""
+          finalSaveDir ?? (await getModulesDirResolved()),
+          merged.content ?? "",
+          {
+            isLocal: true,
+            localizeResources: loadConfig().localizeScriptsOnDownload,
+            repairMissingResources: true,
+          },
         )
+        if (!result.ok) throw new Error(result.message ?? "本地模块写入失败")
       } else {
         await updateModuleMetadata({ ...merged, name: finalName, filePath: finalFilePath }, {
           link: merged.link,
@@ -1208,7 +1217,10 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
     list: ModuleInfo[],
     title: string,
     sourceContents?: Map<string, string>,
-    options: { preferInstalledConverterSources?: boolean } = {},
+    options: {
+      preferInstalledConverterSources?: boolean
+      repairMissingLocalResources?: boolean
+    } = {},
   ) {
     const downloadable = list.filter((m) => !!m.link)
     if (!downloadable.length) {
@@ -1233,6 +1245,7 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
       const configuredConcurrency = Math.max(1, Math.min(cfg.downloadConcurrency || 3, total))
       const localizeEnabled = loadConfig().localizeScriptsOnDownload
       const preferInstalledConverterSources = options.preferInstalledConverterSources ?? true
+      const repairMissingLocalResources = options.repairMissingLocalResources ?? true
       const hasLocalPathSync = downloadable.some((item) => item.localResources)
       const concurrency = sourceContents || localizeEnabled || hasLocalPathSync ? 1 : configuredConcurrency
 
@@ -1252,10 +1265,9 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
           const m = downloadable[idx]
           const linkPrefix = await detectLinkPrefix(m)
           let sourceContent = sourceContents?.get(moduleKey(m))
-          // A converter URL is not a stable module download endpoint. When
-          // the installed module already has local resources, use its current
-          // text first and only fall back to the URL if that text cannot be
-          // read from the selected Surge bookmark.
+          // A converter URL is not a stable module download endpoint. For
+          // those generic conversion links, use the installed module text
+          // first and only fall back to the URL if it cannot be read.
           if (
             sourceContent === undefined &&
             preferInstalledConverterSources &&
@@ -1269,14 +1281,18 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
             downloadInfo,
             sourceContent === undefined
               ? undefined
-              : { content: sourceContent, localizeResources: localizeEnabled },
+              : {
+                content: sourceContent,
+                localizeResources: localizeEnabled,
+                repairMissingResources: repairMissingLocalResources,
+              },
           )
 
           // Some `#!url` values are converter endpoints rather than direct
           // Surge module downloads. If the remote response is invalid, keep
           // the installed module as the source and repair/localize it
-          // offline. This is what makes Update All safe for boxjs and similar
-          // Script-Hub-generated modules.
+          // offline. This is what makes Update All safe for Script-Hub-generated
+          // modules and other converter endpoints.
           if (
             !res.ok &&
             sourceContent === undefined &&
@@ -1287,7 +1303,11 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
             if (sourceContent !== undefined) {
               const fallback = await downloadModule(
                 downloadInfo,
-                { content: sourceContent, localizeResources: localizeEnabled },
+                {
+                  content: sourceContent,
+                  localizeResources: localizeEnabled,
+                  repairMissingResources: repairMissingLocalResources,
+                },
               )
               if (fallback.ok) res = fallback
             }

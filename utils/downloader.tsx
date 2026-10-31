@@ -21,6 +21,8 @@ export type DownloadModuleOptions = {
   content?: string
   /** Override the global setting for this one write. */
   localizeResources?: boolean
+  /** Recover a missing file for a module that already claims local resources. */
+  repairMissingResources?: boolean
   /** Preserve local-file import semantics and metadata. */
   isLocal?: boolean
 }
@@ -179,7 +181,7 @@ async function writeFinalModule(
   info: ModuleInfo & { linkPrefix?: string },
   targetDir: string,
   rawText: string,
-  options: Pick<DownloadModuleOptions, "localizeResources"> = {},
+  options: Pick<DownloadModuleOptions, "localizeResources" | "repairMissingResources"> = {},
 ): Promise<{ path: string; localizedResources: number }> {
   const preparedContent = prepareModuleText(rawText, info)
   const path = moduleFilePath(info.name, targetDir)
@@ -190,7 +192,9 @@ async function writeFinalModule(
   const surgeRoot = await requireSurgeProfileDir(targetDir)
   const normalized = shouldLocalize
     ? null
-    : await syncLocalModuleResourcePaths(preparedContent, info, path, surgeRoot)
+    : await syncLocalModuleResourcePaths(preparedContent, info, path, surgeRoot, {
+      recoverMissingResources: options.repairMissingResources ?? true,
+    })
   const localized = shouldLocalize
     ? await localizeModuleResources(preparedContent, info, path, surgeRoot)
     : null
@@ -236,7 +240,7 @@ export async function writeModuleText(
   info: ModuleInfo & { linkPrefix?: string },
   targetDir: string,
   rawText: string,
-  options: Pick<DownloadModuleOptions, "localizeResources" | "isLocal"> = {},
+  options: Pick<DownloadModuleOptions, "localizeResources" | "repairMissingResources" | "isLocal"> = {},
 ): Promise<{ ok: boolean; message?: string; path?: string; localizedResources?: number }> {
   const fm: any = (globalThis as any).FileManager
   if (!fm?.writeAsString) return { ok: false, message: "FileManager.writeAsString 不可用" }
@@ -252,7 +256,9 @@ export async function writeModuleText(
     const surgeRoot = await requireSurgeProfileDir(targetDir)
     const normalized = shouldLocalize
       ? null
-      : await syncLocalModuleResourcePaths(preparedContent, info, path, surgeRoot)
+      : await syncLocalModuleResourcePaths(preparedContent, info, path, surgeRoot, {
+        recoverMissingResources: options.repairMissingResources ?? true,
+      })
     const localized = shouldLocalize
       ? await localizeModuleResources(preparedContent, info, path, surgeRoot)
       : null
@@ -294,7 +300,7 @@ async function downloadModuleDirect(
   info: ModuleInfo & { linkPrefix?: string },
   targetDir: string,
   sourceContent?: string,
-  options: Pick<DownloadModuleOptions, "localizeResources"> = {},
+  options: Pick<DownloadModuleOptions, "localizeResources" | "repairMissingResources"> = {},
 ): Promise<{ path: string; localizedResources: number }> {
   const text = sourceContent ?? await fetchModuleText(info.link)
   return writeFinalModule(fm, info, targetDir, text, options)
@@ -305,7 +311,7 @@ async function downloadModuleStream(
   info: ModuleInfo & { linkPrefix?: string },
   targetDir: string,
   sourceContent?: string,
-  options: Pick<DownloadModuleOptions, "localizeResources"> = {},
+  options: Pick<DownloadModuleOptions, "localizeResources" | "repairMissingResources"> = {},
 ): Promise<{ path: string; localizedResources: number }> {
   if (sourceContent !== undefined) {
     return writeFinalModule(fm, info, targetDir, sourceContent, options)
@@ -355,15 +361,18 @@ export async function downloadModule(
   // network request followed by a write into the Scripting private folder.
   await requireSurgeProfileDir(targetDir)
   const localizeResources = options.localizeResources ?? loadConfig().localizeScriptsOnDownload
+  const repairMissingResources = options.repairMissingResources ?? true
   try {
     let result: { path: string; localizedResources: number }
     if (options.mode === "direct") {
       result = await downloadModuleDirect(fm, info, targetDir, options.content, {
         localizeResources,
+        repairMissingResources,
       })
     } else {
       result = await downloadModuleStream(fm, info, targetDir, options.content, {
         localizeResources,
+        repairMissingResources,
       })
     }
     return { ok: true, path: result.path, localizedResources: result.localizedResources }
