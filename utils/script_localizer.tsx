@@ -139,13 +139,21 @@ function legacyResourceDirectories(
   ]
 }
 
-function migratedResourceFileName(path: string, kind: RemoteModuleResourceReference["kind"]): string {
+function migratedResourceFileName(
+  path: string,
+  kind: RemoteModuleResourceReference["kind"],
+  referenceValue?: string,
+): string {
+  // The module's current reference is authoritative. In particular,
+  // `chavy.boxjs-71ef70c1.js` is a real resource name, not a suffix that may
+  // be stripped: Surge must see the exact same basename in the profile root.
+  const referencedBase = pathBaseName(referenceValue ?? "")
+  if (referencedBase && /\.[A-Za-z0-9]{1,16}$/.test(referencedBase)) {
+    return safeFileName(referencedBase, resourceFileName(path, kind))
+  }
   const base = pathBaseName(path)
-  // Earlier builds appended an 8-character URL hash. Strip only that known
-  // generated suffix while keeping the original remote basename intact.
-  const withoutGeneratedHash = base.replace(/^(.*)-[0-9a-f]{8}(\.[^./]+)$/i, "$1$2")
-  if (withoutGeneratedHash && /\.[A-Za-z0-9]{1,16}$/.test(withoutGeneratedHash)) {
-    return safeFileName(withoutGeneratedHash, resourceFileName(path, kind))
+  if (base && /\.[A-Za-z0-9]{1,16}$/.test(base)) {
+    return safeFileName(base, resourceFileName(path, kind))
   }
   return resourceFileName(path, kind)
 }
@@ -401,7 +409,10 @@ async function rebaseExistingLocalResourcePaths(
     // Always canonicalize an existing local reference into the Surge root.
     // This handles hidden legacy paths, the intermediate Scripts tree, and
     // the hash-suffixed root files shown in the Files screenshots.
-    const visiblePath = Path.join(rootDir, migratedResourceFileName(physicalPath, reference.kind))
+    const visiblePath = Path.join(
+      rootDir,
+      migratedResourceFileName(physicalPath, reference.kind, value),
+    )
     const previousSource = targetSources.get(visiblePath)
     if (previousSource && previousSource !== physicalPath) {
       throw new Error(`本地资源文件名冲突：${pathBaseName(visiblePath)}（${previousSource} 与 ${physicalPath}）`)
