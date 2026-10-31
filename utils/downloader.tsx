@@ -32,17 +32,17 @@ const FETCH_TIMEOUT_MS = 30 * 1000
 const FILE_OPERATION_TIMEOUT_MS = 15 * 1000
 
 async function requireSurgeLocalizationRoot(profileDir: string | undefined, targetDir: string): Promise<string> {
-  const root = await getSurgeBookmarkRoot()
-  if (!root) {
+  const modulesRoot = await getSurgeBookmarkRoot()
+  if (!modulesRoot) {
     throw new Error("本地化资源必须写入 Surge iCloud 模块目录，请先在设置中选择有效的 Surge 书签文件夹")
   }
-  if (profileDir && !isPathWithin(root, profileDir)) {
-    throw new Error("本地化资源根目录不在 Surge iCloud 书签内，请重新选择 Surge 模块目录")
+  if (profileDir && !isPathWithin(modulesRoot, profileDir)) {
+    throw new Error("本地化资源根目录不在 Surge iCloud 模块目录内，请重新选择 Surge 模块目录")
   }
-  if (!isPathWithin(root, targetDir)) {
+  if (!isPathWithin(modulesRoot, targetDir)) {
     throw new Error("模块目标目录不在 Surge iCloud 书签内，已拒绝写入本地资源")
   }
-  return root
+  return modulesRoot
 }
 
 async function writeString(fm: any, path: string, content: string): Promise<void> {
