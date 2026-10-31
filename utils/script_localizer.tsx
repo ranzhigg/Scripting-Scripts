@@ -49,6 +49,32 @@ function safeFileName(value: string, fallback: string): string {
   return fixed || fallback
 }
 
+// These helpers are intentionally migration-only. The hash is never written
+// to a new resource filename; it only lets us locate files created by v4.2.14
+// and earlier in the old `Scripts/<module-hash>/...` cache.
+function shortHash(value: string): string {
+  let hash = 0x811c9dc5
+  for (const char of String(value ?? "")) {
+    hash ^= char.charCodeAt(0)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0").slice(0, 8)
+}
+
+function legacySafeSegment(value: string, fallback: string): string {
+  const fixed = String(value ?? "")
+    .replace(/[^A-Za-z0-9._-]+/g, "_")
+    .replace(/^\.+/, "")
+    .replace(/_+/g, "_")
+    .replace(/^[_-]+|[_-]+$/g, "")
+    .slice(0, 80)
+  return fixed || fallback
+}
+
+function kindDirectory(kind: RemoteModuleResourceReference["kind"]): string {
+  return kind === "script" ? "scripts" : kind === "include" ? "includes" : "rulesets"
+}
+
 function resourceFileName(url: string, kind: RemoteModuleResourceReference["kind"]): string {
   const fallback = kind === "script" ? "script.js" : kind === "include" ? "include.conf" : "rules.list"
   let last = fallback
@@ -58,6 +84,20 @@ function resourceFileName(url: string, kind: RemoteModuleResourceReference["kind
     if (path) last = decodeURIComponent(path)
   } catch {}
   return safeFileName(last, fallback)
+}
+
+function legacyResourceFileName(url: string, kind: RemoteModuleResourceReference["kind"]): string {
+  const fallback = kind === "script" ? "script.js" : kind === "include" ? "include.conf" : "rules.list"
+  let last = fallback
+  try {
+    const parsed = new URL(url)
+    const path = parsed.pathname.split("/").pop() ?? ""
+    if (path) last = decodeURIComponent(path)
+  } catch {}
+  const defaultExtension = kind === "script" ? ".js" : kind === "include" ? ".conf" : ".list"
+  const extension = last.match(/\.[A-Za-z0-9]{1,8}$/)?.[0] ?? defaultExtension
+  const stem = last.replace(/\.[A-Za-z0-9]{1,8}$/, "") || kind
+  return `${legacySafeSegment(stem, kind)}-${shortHash(`${kind}:${url}`)}${extension.toLowerCase()}`
 }
 
 function pathBaseName(path: string): string {
@@ -73,6 +113,30 @@ function inferResourceRoot(modulePath: string): string {
   const index = Math.max(moduleIndex, modulesIndex)
   if (index > 0) return parts.slice(0, index).join("/") || "/"
   return Path.dirname(Path.dirname(modulePath))
+}
+
+function legacyResourceDirectories(
+  resourceRoot: string,
+  modulePath: string,
+  moduleName: string,
+  kind: RemoteModuleResourceReference["kind"],
+): string[] {
+  const moduleDirectory = `${legacySafeSegment(moduleName, "module")}-${shortHash(moduleName)}`
+  const kindDir = kindDirectory(kind)
+  const moduleDir = Path.dirname(modulePath)
+  // v4.2.14 and earlier used both the visible `Scripts` tree and the hidden
+  // `.scripting-resources` tree, depending on which build wrote the module.
+  // Both are still inside the user's selected Surge bookmark, so they are
+  // safe migration sources; neither is a fallback to Scripting's private
+  // documents directory.
+  return [
+    Path.join(resourceRoot, "Scripts", moduleDirectory, kindDir),
+    Path.join(resourceRoot, ".scripting-resources", moduleDirectory, kindDir),
+    Path.join(moduleDir, "Scripts", moduleDirectory, kindDir),
+    Path.join(moduleDir, ".scripting-resources", moduleDirectory, kindDir),
+    Path.join(moduleDir, "Scripts", kindDir),
+    Path.join(moduleDir, ".scripting-resources", kindDir),
+  ]
 }
 
 function migratedResourceFileName(path: string, kind: RemoteModuleResourceReference["kind"]): string {
@@ -152,6 +216,26 @@ async function resourceFileExists(path: string): Promise<boolean> {
   }
 }
 
+async function findLegacyResourcePath(
+  url: string,
+  kind: RemoteModuleResourceReference["kind"],
+  resourceRoot: string,
+  modulePath: string,
+  moduleName: string,
+): Promise<string> {
+  const legacyName = legacyResourceFileName(url, kind)
+  const candidates = [
+    ...legacyResourceDirectories(resourceRoot, modulePath, moduleName, kind)
+      .map((directory) => Path.join(directory, legacyName)),
+    Path.join(resourceRoot, legacyName),
+    Path.join(Path.dirname(modulePath), legacyName),
+  ]
+  for (const candidate of candidates) {
+    if (await resourceFileExists(candidate)) return candidate
+  }
+  return ""
+}
+
 function fetchTimeoutMessage(url: string): string {
   return `模块资源下载超时（${RESOURCE_FETCH_TIMEOUT_MS / 1000}s）：${url}`
 }
@@ -206,7 +290,7 @@ function upsertLocalResourcesTag(content: string): string {
 }
 
 async function writeResourceFile(path: string, content: string): Promise<FileChange> {
-  const existed = await exists(path)
+  const existed = await resourceFileExists(path)
   const previous = existed ? await readString(path) : undefined
   await ensureDirectory(Path.dirname(path))
   await withTimeout(
@@ -251,6 +335,7 @@ async function rollbackChanges(changes: FileChange[]): Promise<void> {
 async function rebaseExistingLocalResourcePaths(
   content: string,
   modulePath: string,
+  moduleName: string,
   resourceRoot?: string,
   changes: FileChange[] = [],
 ): Promise<string> {
@@ -270,7 +355,7 @@ async function rebaseExistingLocalResourcePaths(
     return index > 0 ? normalized.slice(0, index) : ""
   }
 
-  function candidatePaths(value: string): string[] {
+  function candidatePaths(value: string, kind: RemoteModuleResourceReference["kind"]): string[] {
     if (value.startsWith("/")) return [value]
     const candidates: string[] = []
     const add = (candidate: string) => {
@@ -284,6 +369,9 @@ async function rebaseExistingLocalResourcePaths(
     add(Path.join(moduleDir, value))
     add(Path.join(moduleRoot, value))
     add(Path.join(modulesRoot, value))
+    for (const directory of legacyResourceDirectories(rootDir, modulePath, moduleName, kind)) {
+      add(Path.join(directory, pathBaseName(value)))
+    }
 
     // v4.2.11 wrote a path relative to the outer `Surge` bookmark, for
     // example `Module/Offline/.scripting-resources/...`. Walk the containing
@@ -302,7 +390,7 @@ async function rebaseExistingLocalResourcePaths(
   for (const reference of references) {
     const value = String(reference.value ?? "").trim()
     let physicalPath = ""
-    for (const candidate of candidatePaths(value)) {
+    for (const candidate of candidatePaths(value, reference.kind)) {
       if (await resourceFileExists(candidate)) {
         physicalPath = candidate
         break
@@ -378,6 +466,7 @@ export async function localizeModuleResources(
     rebasedContent = await rebaseExistingLocalResourcePaths(
       content,
       modulePath,
+      _info.name,
       rootDir,
       changes,
     )
@@ -424,7 +513,16 @@ export async function localizeModuleResources(
       const relative = relativeProfilePath(rootDir, filePath)
       let resourceText = resourceTexts.get(filePath)
       if (resourceText === undefined) {
-        resourceText = await fetchResourceText(reference.value)
+        const legacyPath = await findLegacyResourcePath(
+          reference.value,
+          reference.kind,
+          rootDir,
+          modulePath,
+          _info.name,
+        )
+        resourceText = legacyPath
+          ? await readString(legacyPath)
+          : await fetchResourceText(reference.value)
         resourceTexts.set(filePath, resourceText)
       }
       const current = await (async () => {

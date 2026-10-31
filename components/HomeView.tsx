@@ -546,9 +546,24 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
   async function syncLocalizationSetting(enabled: boolean) {
     const remoteModules = modules.filter((item) => !!item.link)
     if (!remoteModules.length) return
+    let sourceContents: Map<string, string> | undefined
+    if (enabled) {
+      const fm: any = (globalThis as any).FileManager
+      if (fm?.readAsString) {
+        const cached = new Map<string, string>()
+        for (const item of remoteModules) {
+          if (!item.localResources || !item.filePath) continue
+          try {
+            cached.set(moduleKey(item), String(await fm.readAsString(item.filePath) ?? ""))
+          } catch {}
+        }
+        if (cached.size) sourceContents = cached
+      }
+    }
     await downloadBatch(
       remoteModules,
       enabled ? "开启本地化：同步现有模块…" : "关闭本地化：切回远程引用…",
+      sourceContents,
     )
   }
 
