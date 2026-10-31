@@ -101,4 +101,17 @@ if (!rebased.includes("RULE-SET,Offline/.scripting-resources/demo/rulesets/a.lis
   throw new Error("local ruleset path was not rebased")
 }
 
+const visibleLocalSample = [
+  "[Script]",
+  "foo = type=generic,script-path=Offline/Scripts/demo-1234/scripts/a.js",
+  "[Rule]",
+  "RULE-SET,Offline/Scripts/demo-1234/rulesets/a.list,REJECT",
+].join("\n")
+const visibleLocalReferences = extractLocalModuleResourceReferences(visibleLocalSample)
+if (visibleLocalReferences.length !== 2) throw new Error("visible Scripts resources were not recognized")
+const remoteScriptsPath = extractLocalModuleResourceReferences(
+  "[Script]\nfoo = type=generic,script-path=https://cdn.example.com/Scripts/foo.js",
+)
+if (remoteScriptsPath.length !== 0) throw new Error("remote URL containing /Scripts/ was misclassified as local")
+
 console.log("script_localizer_core: ok")

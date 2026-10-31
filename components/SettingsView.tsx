@@ -521,7 +521,7 @@ export function SettingsView(props: {
             header={<Text>下载设置</Text>}
             footer={(
               <Text font="caption" foregroundStyle="secondaryLabel">
-                开启后，更新或导入模块时会下载 [Script] 中的远程 script-path、[Rule]/[Ruleset] 中的 RULE-SET 或 DOMAIN-SET，以及远程 #!include，保存到模块目录的 .scripting-resources 文件夹，并按 Surge/Module 配置根目录生成本地相对路径（例如 Offline/.scripting-resources/...）。普通规则、重写目标和请求参数不会被改写；关闭后仍可在模块菜单中单独执行“本地化脚本与规则集”。
+                开启后，更新或导入模块时会下载 [Script] 中的远程 script-path、[Rule]/[Ruleset] 中的 RULE-SET 或 DOMAIN-SET，以及远程 #!include，保存到 Surge/Module 下可见的 Scripts 文件夹，并按 Surge/Module 配置根目录生成本地相对路径（例如 Offline/Scripts/...）。普通规则、重写目标和请求参数不会被改写；关闭后仍可在模块菜单中单独执行“本地化脚本与规则集”。
               </Text>
             )}
           >
@@ -567,7 +567,7 @@ export function SettingsView(props: {
             header={<Text>旧数据清理</Text>}
             footer={(
               <Text font="caption" foregroundStyle="secondaryLabel">
-                仅清理旧版本误用的私有 .scripting-resources 目录，不会删除模块、备份、分类或配置。
+                仅清理旧版本误用的私有资源目录，不会删除模块、备份、分类或配置；新版本资源会写入 Surge/Module 下可见的 Scripts 文件夹。
               </Text>
             )}
           >

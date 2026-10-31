@@ -987,7 +987,7 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
         setStage(`资源已写入 Surge 配置目录：${result.localizedResources} 个`)
         await Dialog.alert({
           title: "已整理并本地化",
-          message: `已处理 ${result.localizedResources} 个远程资源，并写入当前 Surge iCloud 模块目录。\n\n资源引用已按 Surge/Module 配置根目录生成；如果 Surge 仍显示 Invalid Local Resource，请确认模块文件和 .scripting-resources 位于同一 Surge 配置目录体系内。`,
+          message: `已处理 ${result.localizedResources} 个远程资源，并写入当前 Surge iCloud 模块目录的可见 Scripts 文件夹。\n\n资源引用已按 Surge/Module 配置根目录生成；如果 Surge 仍显示 Invalid Local Resource，请在 Surge 的 External Resources 中点 Update All，确认模块文件和 Offline/Scripts 位于同一 Surge 配置目录体系内。`,
         })
       } else {
         setStage("模块没有可下载的远程资源")

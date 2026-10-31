@@ -490,7 +490,7 @@ async function readModuleInfo(
     localTag != null &&
     String(localTag).trim() !== "" &&
     !["0", "false", "no"].includes(String(localTag).trim().toLowerCase())
-  const hasLocalResourceRefs = /(?:^|[\\/])\.scripting-resources(?:[\\/]|$)/i.test(text)
+  const hasLocalResourceRefs = /(?:^|[\\/])(?:\.scripting-resources|Scripts)(?:[\\/]|$)/i.test(text)
   const isLocal = hasLocalTag || !link
   const category = parseTag(text, "category") ?? parseTag(text, "cagegory") ?? undefined
   const surgeName = parseTag(text, "name") ?? undefined

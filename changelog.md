@@ -1,5 +1,10 @@
 # 更新日志
 
+## v4.2.14
+
+- 修复资源不可见导致的 `Invalid Local Resource`：新本地化资源不再写入隐藏的 `.scripting-resources`，统一写入 Surge/Module 下可见的 `Scripts/<模块>/` 目录。
+- 迁移旧模块时会把已有隐藏目录中的脚本、规则集和 include 复制到可见目录，并同步把模块内的 `script-path`、`RULE-SET`、`DOMAIN-SET` 和 `#!include` 改为相对于 Surge/Module 的 `Offline/Scripts/...` 路径；不重复下载已有文件。
+
 ## v4.2.13
 
 - 修正子目录模块的资源引用基准：Surge 的 `script-path`、`RULE-SET`、`DOMAIN-SET` 和 `#!include` 统一相对于 `Surge/Module` 配置根目录生成；例如 `Module/Offline/Demo.sgmodule` 使用 `Offline/.scripting-resources/...`，不再生成错误的 `Module/Offline/...` 或遗漏 `Offline/` 的短路径。

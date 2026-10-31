@@ -48,7 +48,13 @@ function isRemoteURL(value: string): boolean {
 }
 
 function isLocalResourcePath(value: string): boolean {
-  return /(?:^|[\\/])\.scripting-resources(?:[\\/]|$)/i.test(String(value ?? "").trim())
+  // `.scripting-resources` was used by early builds, but a dot-directory is
+  // hidden by iCloud Drive's Files provider and is not reliably discovered by
+  // Surge. New local resources live under the visible `Scripts` directory.
+  // Keep the legacy marker so an update can migrate old modules in place.
+  const normalized = String(value ?? "").trim()
+  if (isRemoteURL(normalized)) return false
+  return /(?:^|[\\/])(?:\.scripting-resources|Scripts)(?:[\\/]|$)/i.test(normalized)
 }
 
 function acceptsResourceValue(value: string, includeLocal: boolean): boolean {
@@ -186,7 +192,7 @@ export function extractRemoteModuleResourceReferences(content: string): RemoteMo
   return references
 }
 
-/** Find resources already rewritten into the local `.scripting-resources` tree. */
+/** Find resources already rewritten into the local visible/legacy resource tree. */
 export function extractLocalModuleResourceReferences(content: string): RemoteModuleResourceReference[] {
   const lines = String(content ?? "").split(/\r?\n/g)
   const references: RemoteModuleResourceReference[] = []
