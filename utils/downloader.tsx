@@ -7,6 +7,8 @@ import {
   ensureStorage,
   type ModuleInfo,
   getModulesDirResolved,
+  getSurgeBookmarkRoot,
+  isPathWithin,
 } from "./storage"
 import { downloadWithProgress } from "./stream_downloader"
 import { validateSurgeModuleText } from "./module_validation"
@@ -28,6 +30,20 @@ export type DownloadModuleOptions = {
 
 const FETCH_TIMEOUT_MS = 30 * 1000
 const FILE_OPERATION_TIMEOUT_MS = 15 * 1000
+
+async function requireSurgeLocalizationRoot(profileDir: string | undefined, targetDir: string): Promise<string> {
+  const root = await getSurgeBookmarkRoot()
+  if (!root) {
+    throw new Error("本地化资源必须写入 Surge iCloud 模块目录，请先在设置中选择有效的 Surge 书签文件夹")
+  }
+  if (profileDir && !isPathWithin(root, profileDir)) {
+    throw new Error("本地化资源根目录不在 Surge iCloud 书签内，请重新选择 Surge 模块目录")
+  }
+  if (!isPathWithin(root, targetDir)) {
+    throw new Error("模块目标目录不在 Surge iCloud 书签内，已拒绝写入本地资源")
+  }
+  return root
+}
 
 async function writeString(fm: any, path: string, content: string): Promise<void> {
   const writer = typeof fm?.writeAsString === "function"
@@ -190,7 +206,9 @@ async function writeFinalModule(
   // Keep the module in its chosen subdirectory, but calculate references from
   // the resolved iCloud Surge root so `subdir/.scripting-resources/...` is
   // written into the same bookmark and remains valid after a refresh.
-  const profileDir = options.profileDir ?? ((await getModulesDirResolved()) || targetDir)
+  const profileDir = shouldLocalize
+    ? await requireSurgeLocalizationRoot(options.profileDir, targetDir)
+    : options.profileDir ?? ((await getModulesDirResolved()) || targetDir)
   const localized = shouldLocalize
     ? await localizeModuleResources(preparedContent, info, path, profileDir)
     : null
@@ -245,7 +263,9 @@ export async function writeModuleText(
       : validateSurgeModuleText(rawText)
     const path = moduleFilePath(info.name, targetDir)
     const shouldLocalize = (options.localizeResources ?? loadConfig().localizeScriptsOnDownload) || !!info.localResources || !!info.localScripts
-    const profileDir = options.profileDir ?? ((await getModulesDirResolved()) || targetDir)
+    const profileDir = shouldLocalize
+      ? await requireSurgeLocalizationRoot(options.profileDir, targetDir)
+      : options.profileDir ?? ((await getModulesDirResolved()) || targetDir)
     const localized = shouldLocalize
       ? await localizeModuleResources(preparedContent, info, path, profileDir)
       : null

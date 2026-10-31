@@ -36,6 +36,7 @@ import {
   listDirectSubDirs,
   saveLocalModule,
   getModulesDirResolved,
+  getSurgeBookmarkRoot,
   moveModuleFile,
 } from "../utils/storage"
 import { loadConfig, persistCategory, type AppConfig } from "../utils/config"
@@ -964,7 +965,7 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
     try {
       const fm: any = (globalThis as any).FileManager
       if (!fm?.readAsString) throw new Error("FileManager.readAsString 不可用")
-      const profileDir = await getModulesDirResolved()
+      const profileDir = await getSurgeBookmarkRoot()
       if (!profileDir) throw new Error("Surge iCloud 书签根目录不可用，请在设置页重新选择")
       const content = String(await fm.readAsString(path) ?? "")
       const result = await writeModuleText(

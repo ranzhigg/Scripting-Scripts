@@ -23,7 +23,7 @@ import {
   saveConfig,
   type AppConfig,
 } from "../utils/config"
-import { countModulesByCategory, loadCategoriesFromModules, renameCategoryInModules } from "../utils/storage"
+import { countModulesByCategory, getSurgeBookmarkRoot, loadCategoriesFromModules, renameCategoryInModules } from "../utils/storage"
 import {
   exportMetadataToICloud,
   exportMetadataWithDocumentPicker,
@@ -513,7 +513,19 @@ export function SettingsView(props: {
               value={cfg.localizeScriptsOnDownload}
               onChanged={(value: boolean) => {
                 HapticFeedback.heavyImpact()
-                setCfg((c) => ({ ...c, localizeScriptsOnDownload: value }))
+                void (async () => {
+                  if (value) {
+                    const root = await getSurgeBookmarkRoot()
+                    if (!root) {
+                      await Dialog.alert({
+                        title: "无法开启本地化",
+                        message: "请先选择有效的 Surge iCloud 模块书签文件夹。资源不能写入 Scripting 私有目录，否则 Surge 无法加载。",
+                      })
+                      return
+                    }
+                  }
+                  setCfg((c) => ({ ...c, localizeScriptsOnDownload: value }))
+                })()
               }}
             />
           </Section>

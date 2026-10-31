@@ -127,6 +127,36 @@ export async function getModulesDirResolved(baseDir?: string): Promise<string> {
   return target
 }
 
+/**
+ * Return the resolved Surge iCloud bookmark root used for module resources.
+ *
+ * Resource localization must never fall back to Scripting's own documents
+ * directory: Surge resolves module resources from its selected profile root.
+ * Requiring both the configured path and bookmark name also lets callers
+ * distinguish a real, still-valid external folder from the legacy fallback.
+ */
+export async function getSurgeBookmarkRoot(): Promise<string> {
+  try {
+    const cfg = loadConfig()
+    const configured = String(cfg.baseDir ?? "").trim()
+    const bookmarkName = String(cfg.baseBookmarkName ?? "").trim()
+    if (!configured || !bookmarkName) return ""
+
+    const fm = fmOrThrow()
+    if (typeof fm.bookmarkedPath !== "function") return ""
+    const resolved = await resolveBookmarkedPath(configured, bookmarkName)
+    return normalizePath(resolved ?? "")
+  } catch {
+    return ""
+  }
+}
+
+export function isPathWithin(root: string, target: string): boolean {
+  const base = normalizePath(root)
+  const value = normalizePath(target)
+  return !!base && !!value && (value === base || value.startsWith(`${base}/`))
+}
+
 async function exists(path: string): Promise<boolean> {
   const fm = fmOrThrow()
   if (typeof fm.exists === "function") return !!(await fm.exists(path))

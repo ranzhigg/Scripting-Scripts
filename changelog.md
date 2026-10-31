@@ -1,5 +1,10 @@
 # 更新日志
 
+## v4.2.6
+
+- 收紧资源本地化路径：只有在有效的 Surge iCloud 书签目录内才允许写入 `.scripting-resources`，不再回退到 Scripting 私有目录。
+- 开启自动本地化或手动本地化时，如果 Surge 书签失效、目标目录越界或目录未授权，会直接提示并拒绝写入。
+
 ## v4.2.5
 
 - 新增可选“下载时本地化脚本与规则集”：更新或导入模块时，自动下载远程 `script-path`、`RULE-SET`、`DOMAIN-SET` 和 `#!include`，保存到模块目录的 `.scripting-resources`，并改写为本地相对路径。
