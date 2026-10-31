@@ -24,7 +24,7 @@ export type DownloadModuleOptions = {
   localizeResources?: boolean
   /** Preserve local-file import semantics and metadata. */
   isLocal?: boolean
-  /** Resolved Surge profile root used for relative module-resource references. */
+  /** Resolved iCloud/Surge bookmark root used to validate local writes. */
   profileDir?: string
 }
 
@@ -34,10 +34,10 @@ const FILE_OPERATION_TIMEOUT_MS = 15 * 1000
 async function requireSurgeLocalizationRoot(profileDir: string | undefined, targetDir: string): Promise<string> {
   const modulesRoot = await getSurgeBookmarkRoot()
   if (!modulesRoot) {
-    throw new Error("本地化资源必须写入 Surge iCloud 模块目录，请先在设置中选择有效的 Surge 书签文件夹")
+    throw new Error("本地化资源必须写入 iCloud/Surge/Module，请先在设置中选择有效的 Surge 书签文件夹")
   }
   if (profileDir && !isPathWithin(modulesRoot, profileDir)) {
-    throw new Error("本地化资源根目录不在 Surge iCloud 模块目录内，请重新选择 Surge 模块目录")
+    throw new Error("本地化资源根目录不在 iCloud/Surge 书签范围内，请重新选择 Surge 文件夹")
   }
   if (!isPathWithin(modulesRoot, targetDir)) {
     throw new Error("模块目标目录不在 Surge iCloud 书签内，已拒绝写入本地资源")
@@ -201,16 +201,15 @@ async function writeFinalModule(
   const preparedContent = prepareModuleText(rawText, info)
   const path = moduleFilePath(info.name, targetDir)
   const shouldLocalize = (options.localizeResources ?? loadConfig().localizeScriptsOnDownload) || !!info.localResources || !!info.localScripts
-  // Surge resolves local module resources from the selected profile/bookmark
-  // root, not from whichever subdirectory happens to contain this module.
-  // Keep the module in its chosen subdirectory, but calculate references from
-  // the resolved iCloud Surge root so `subdir/.scripting-resources/...` is
-  // written into the same bookmark and remains valid after a refresh.
-  const profileDir = shouldLocalize
-    ? await requireSurgeLocalizationRoot(options.profileDir, targetDir)
-    : options.profileDir ?? ((await getModulesDirResolved()) || targetDir)
+  // Validate the selected iCloud/Surge bookmark first. Resources themselves
+  // are kept beside the module in the actual `Surge/Module` directory, so the
+  // module can use the stable `.scripting-resources/...` relative path that
+  // Surge shows for local module resources.
+  if (shouldLocalize) {
+    await requireSurgeLocalizationRoot(options.profileDir, targetDir)
+  }
   const localized = shouldLocalize
-    ? await localizeModuleResources(preparedContent, info, path, profileDir)
+    ? await localizeModuleResources(preparedContent, info, path, targetDir)
     : null
   const content = localized?.content ?? preparedContent
 
@@ -263,11 +262,11 @@ export async function writeModuleText(
       : validateSurgeModuleText(rawText)
     const path = moduleFilePath(info.name, targetDir)
     const shouldLocalize = (options.localizeResources ?? loadConfig().localizeScriptsOnDownload) || !!info.localResources || !!info.localScripts
-    const profileDir = shouldLocalize
-      ? await requireSurgeLocalizationRoot(options.profileDir, targetDir)
-      : options.profileDir ?? ((await getModulesDirResolved()) || targetDir)
+    if (shouldLocalize) {
+      await requireSurgeLocalizationRoot(options.profileDir, targetDir)
+    }
     const localized = shouldLocalize
-      ? await localizeModuleResources(preparedContent, info, path, profileDir)
+      ? await localizeModuleResources(preparedContent, info, path, targetDir)
       : null
     const content = localized?.content ?? preparedContent
     try {

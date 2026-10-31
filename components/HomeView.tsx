@@ -957,7 +957,7 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
     const path = target.filePath ?? moduleFilePath(target.name, inferSaveDir(target))
     const targetDir = inferSaveDir(target) ?? (await getModulesDirResolved())
     if (!targetDir) {
-      await Dialog.alert({ message: "书签路径不可用，请在设置页重新选择 Surge 模块目录" })
+      await Dialog.alert({ message: "书签路径不可用，请在设置页重新选择 iCloud/Surge 文件夹" })
       return
     }
     setBusy(true)

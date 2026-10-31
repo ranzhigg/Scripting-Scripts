@@ -229,7 +229,7 @@ export async function localizeModuleResources(
   content: string,
   info: Pick<ModuleInfo, "name">,
   modulePath: string,
-  profileDir?: string,
+  moduleDir?: string,
 ): Promise<ScriptLocalizationResult> {
   const references = extractRemoteModuleResourceReferences(content)
   if (!references.length) {
@@ -251,7 +251,10 @@ export async function localizeModuleResources(
   const uniqueResources = Array.from(
     new Map(references.map((ref) => [`${ref.kind}:${ref.value}`, ref])).values(),
   )
-  const rootDir = profileDir || Path.dirname(modulePath)
+  // Keep the reference relative to the directory containing the module. The
+  // manager's external bookmark is `iCloud/Surge`, while the actual module
+  // directory is `iCloud/Surge/Module` (or a subdirectory below it).
+  const rootDir = moduleDir || Path.dirname(modulePath)
   const replacements = new Map<string, string>()
   const changes: FileChange[] = []
 

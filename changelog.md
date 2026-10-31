@@ -1,9 +1,15 @@
 # 更新日志
 
+## v4.2.9
+
+- 设置只需选择 iCloud Drive 的 `Surge` 根目录；脚本会自动创建或复用 `Surge/Module`，模块和本地资源不再要求手动选择子目录。
+- 本地化引用改为相对模块实际所在目录写入，确保 `Surge/Module` 及其子目录中的模块与 `.scripting-resources` 一起可用。
+
 ## v4.2.8
 
 - 修复旧版本地化资源失效后的恢复流程：对仍有远程来源的模块执行“本地化脚本与规则集”时，会重新拉取原始模块内容，并把脚本、规则集和 include 重新写入当前授权的 Surge iCloud 模块目录。
 - 资源始终跟随模块实际所在目录写入 `Surge/Module/.scripting-resources/`，不会重新生成到 Scripting 私有目录；已有失效的 `Invalid Local Resource` 模块可通过单模块本地化或“更新全部”修复。
+- 设置页改为只需授权 iCloud Drive 的 `Surge` 文件夹，首次使用自动创建或复用 `Surge/Module`，不再要求用户手动选择 `Module` 子目录。
 
 ## v4.2.7
 

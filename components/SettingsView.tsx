@@ -196,7 +196,7 @@ export function SettingsView(props: {
       const idx = updated.findIndex((b) => b.name === bookmarkName)
       if (idx >= 0) setBookmarkIdx(idx)
       await refreshCounts(next)
-      await Dialog.alert({ message: "已选择并保存书签文件夹" })
+      await Dialog.alert({ message: "已保存 Surge 文件夹；模块会写入其中的 Module 子目录" })
     } catch (e: any) {
       await Dialog.alert({ title: "选择文件夹失败", message: String(e?.message ?? e) })
     }
@@ -457,7 +457,7 @@ export function SettingsView(props: {
               textFieldStyle="roundedBorder"
             />
             <Text font="caption" foregroundStyle="secondaryLabel">
-              可长按书签文件夹选择新的文件夹，并自动保存为书签
+              请选择 iCloud Drive 的 Surge 文件夹；脚本会自动使用或创建其中的 Module 子目录
             </Text>
             {bookmarks.length ? (
               <Picker
@@ -552,7 +552,7 @@ export function SettingsView(props: {
                     if (!root) {
                       await Dialog.alert({
                         title: "无法开启本地化",
-                        message: "请先选择有效的 Surge iCloud 模块书签文件夹。资源不能写入 Scripting 私有目录，否则 Surge 无法加载。",
+                        message: "请先选择有效的 iCloud/Surge 书签文件夹。脚本会自动使用其中的 Module 子目录，资源不会写入 Scripting 私有目录。",
                       })
                       return
                     }

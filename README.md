@@ -38,8 +38,8 @@ Scripting 在这里是原生模块导入入口，不是另一套代理配置格�
 ## 依赖
 
 - iOS/iPadOS 上安装 Scripting
-- Surge 已开启 iCloud，并能看到本地模块书签目录
-- 首次运行后，在“设置”中选择 Surge 使用的模块目录
+- Surge 已开启 iCloud，并能看到 `iCloud Drive/Surge` 文件夹
+- 首次运行后，在“设置”中选择 iCloud Drive 的 `Surge` 文件夹；脚本会自动使用或创建其中的 `Module` 子目录
 - Script-Hub 转换需要启用 Script-Hub 测试版对应模块和重写
 - 使用 Shadowrocket 平台时需要安装 Shadowrocket；上游不支持的脚本触发器或专属语义会显示兼容性提示
 - Scripting 原生“模块导入”不需要脚本名；选择 Scripting 平台后会通过 `scripting://import_module?url=...` 拉起模块导入页
@@ -52,7 +52,7 @@ Scripting 在这里是原生模块导入入口，不是另一套代理配置格�
 
 1. 打开 Scripting 的“导入远程脚本”。
 2. 粘贴 `https://github.com/ranzhigg/Scripting-Scripts` 并导入。
-3. 打开脚本，在“设置”中选择 Surge 的 iCloud 模块目录。
+3. 打开脚本，在“设置”中选择 iCloud Drive 的 `Surge` 文件夹；无需手动创建或选择 `Module`，脚本会自动处理。
 4. 在项目标题的 Intent 设置中启用 `File URLs`、`URLs` 和 `Text`。
 
 ## 使用 Script-Hub 页面
@@ -62,7 +62,7 @@ Scripting 在这里是原生模块导入入口，不是另一套代理配置格�
 3. 点击“识别来源格式”，必要时在“格式”中手动修正。
 4. 按需展开“高级转换参数”配置请求头、筛选、脚本兼容和运行参数。
 5. 先在“格式与目标”中选择目标平台；目标格式和快速操作会自动同步。
-6. 目标为 Surge 模块时，点击“转换并写入”会写入 Scripting 设置的 Surge 目录；也可以在结果页生成远程安装链接。
+6. 目标为 Surge 模块时，点击“转换并写入”会写入 `iCloud Drive/Surge/Module`；也可以在结果页生成远程安装链接。
 7. QX、Loon、Egern、Shadowrocket、Scripting 的可用目标会生成对应 URL Scheme；Scripting 可在 Surge 模块与 Loon 插件之间切换。不支持直接拉起的组合请复制转换结果交给客户端。
 
 不要打开转换链接后复制浏览器地址栏内容。浏览器地址栏中的链接可能未正确编码，复制后会导致参数异常。
@@ -84,10 +84,10 @@ Scripting 在这里是原生模块导入入口，不是另一套代理配置格�
 
 ### iCloud 目录结构与子目录
 
-资源始终写入已授权的 Surge iCloud 模块书签，不会落到 Scripting 私有目录。模块放在子目录时，资源也跟随模块整理：
+资源始终写入已授权的 `iCloud Drive/Surge/Module`，不会落到 Scripting 私有目录。设置只需授权 `Surge` 根目录，`Module` 不存在时会自动创建；模块放在子目录时，资源也跟随模块整理：
 
 ```text
-Modules/
+Module/
 ├─ Providers/
 │  ├─ Demo.sgmodule
 │  └─ .scripting-resources/
@@ -98,7 +98,7 @@ Modules/
 └─ .surge-module-backups/
 ```
 
-Surge 的 `script-path`、`RULE-SET`、`DOMAIN-SET` 和 `#!include` 都按 profile 根目录解析。因此 `Providers/Demo.sgmodule` 内的引用会同步写成 `Providers/.scripting-resources/...`，不会只写 `.scripting-resources/...` 导致子目录模块找不到资源。普通规则、重写目标、图标和请求参数不会被误改。
+模块内的 `script-path`、`RULE-SET`、`DOMAIN-SET` 和 `#!include` 会按模块实际所在目录改写。因此 `Providers/Demo.sgmodule` 内的资源会写在 `Providers/.scripting-resources/...`，引用保持为该目录下可用的相对路径。普通规则、重写目标、图标和请求参数不会被误改。
 
 ### 批量分享与导入
 

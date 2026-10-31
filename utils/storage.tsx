@@ -22,6 +22,7 @@ export type ModuleInfo = {
 
 const BASE_DIR_NAME = "SurgeModulesManager"
 const MODULES_DIR_NAME = "Modules"
+const SURGE_MODULE_DIR_NAME = "Module"
 const LEGACY_RESOURCE_DIR_NAME = ".scripting-resources"
 const BUILTIN_LINK_PREFIXES = ["#!url=", "#SUBSCRIBED"]
 
@@ -48,6 +49,19 @@ function normalizePath(path: string): string {
   return String(path ?? "").replace(/\/+$/, "")
 }
 
+/**
+ * The bookmark is the user's iCloud/Surge directory. Surge keeps local
+ * modules in its `Module` child. Accept an already-selected Module folder as
+ * a compatibility path so existing installations are not nested again.
+ */
+function surgeModuleDirectory(root: string): string {
+  const normalized = normalizePath(root)
+  if (!normalized) return ""
+  const last = normalized.split("/").pop()?.toLowerCase() ?? ""
+  if (last === "module" || last === "modules") return normalized
+  return Path.join(normalized, SURGE_MODULE_DIR_NAME)
+}
+
 function pickRootDir(): string {
   const fm = fmOrThrow()
   if (fm.isiCloudEnabled && fm.iCloudDocumentsDirectory) {
@@ -64,7 +78,7 @@ export function getBaseDir(): string {
 
 export function getModulesDir(): string {
   const cfg = loadConfig()
-  if (cfg.baseDir) return cfg.baseDir
+  if (cfg.baseDir) return surgeModuleDirectory(cfg.baseDir)
   return Path.join(getBaseDir(), MODULES_DIR_NAME)
 }
 
@@ -116,24 +130,25 @@ export async function getModulesDirResolved(baseDir?: string): Promise<string> {
   if (!target) {
     if (!configured) return getModulesDir()
     const resolved = await resolveBookmarkedPath(configured, bookmarkName)
-    if (resolved) return resolved
-    return bookmarkName ? "" : configured
+    if (resolved) return surgeModuleDirectory(resolved)
+    return bookmarkName ? "" : surgeModuleDirectory(configured)
   }
 
   if (configured && normalizePath(target) === normalizePath(configured)) {
     const resolved = await resolveBookmarkedPath(target, bookmarkName)
-    if (resolved) return resolved
-    return bookmarkName ? "" : target
+    if (resolved) return surgeModuleDirectory(resolved)
+    return bookmarkName ? "" : surgeModuleDirectory(target)
   }
   return target
 }
 
 /**
- * Return the resolved Surge iCloud bookmark root used for module resources.
+ * Return the resolved iCloud/Surge bookmark root selected by the user.
  *
  * Resource localization must never fall back to Scripting's own documents
- * directory: Surge resolves module resources from its selected profile root.
- * Requiring both the configured path and bookmark name also lets callers
+ * directory. The module directory is resolved separately as its `Module`
+ * child, while this root is used for the security-scope boundary check.
+ * Requiring both the configured path and bookmark name lets callers
  * distinguish a real, still-valid external folder from the legacy fallback.
  */
 export async function getSurgeBookmarkRoot(): Promise<string> {
@@ -186,12 +201,10 @@ export async function ensureStorage(): Promise<void> {
     if (!resolved) {
       throw new Error("书签路径不可用，请在设置页重新选择书签文件夹")
     }
-    // A directory returned by bookmarkedPath() is an already selected
-    // security-scoped external folder. Do not run exists/createDirectory on
-    // it before an import: File Provider/iCloud may report a transient false
-    // or keep that metadata call pending even though a direct file write is
-    // valid. Scriptable's URL import likewise writes into the selected iCloud
-    // destination without trying to create the destination folder first.
+    // The user authorizes the iCloud/Surge folder. Create its Module child on
+    // first use (or reuse it when it already exists); all module and resource
+    // writes then stay under that security-scoped directory.
+    await ensureDir(resolved)
     return
   }
   await ensureDir(getBaseDir())
