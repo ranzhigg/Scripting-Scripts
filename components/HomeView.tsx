@@ -52,6 +52,7 @@ import {
 } from "../utils/remote_control"
 import { autoExportMetadataToICloud } from "../utils/metadata_sync"
 import {
+  backupModulePath,
   listModuleBackups,
   restoreModuleBackup,
   type ModuleBackup,
@@ -951,6 +952,9 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
     setBusy(true)
     setStage("修改模块中…")
     setProgress(null)
+    let movedPath = ""
+    let originalBackupPath: string | null = null
+    let contentCommitted = false
     try {
       persistModuleCategory(merged.category)
       const finalName = merged.name || target.name
@@ -958,8 +962,14 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
       const needMove =
         finalName !== target.name ||
         String(finalSaveDir ?? "") !== String(originalSaveDir ?? "")
+      if (needMove && target.filePath) {
+        // Preserve the pre-move bytes as well as the path. If the following
+        // write fails, the destination may already have been removed by its
+        // own rollback, so a rename-back alone would not be sufficient.
+        originalBackupPath = await backupModulePath(target.filePath)
+      }
       const finalFilePath = needMove
-        ? await moveModuleFile(target, finalSaveDir, finalName)
+        ? (movedPath = await moveModuleFile(target, finalSaveDir, finalName))
         : (target.filePath ?? moduleFilePath(finalName, finalSaveDir))
 
       if (merged.isLocal || !merged.link) {
@@ -982,11 +992,30 @@ export function HomeView(props: { refreshToken?: number; tag?: number; tabItem?:
           local: false,
         })
       }
+      contentCommitted = true
       await refreshModules()
       await syncMetadataIfNeeded()
       setStage("修改完成")
     } catch (e: any) {
-      setStage(`修改失败：${String(e?.message ?? e)}`)
+      let message = String(e?.message ?? e)
+      if (movedPath && !contentCommitted) {
+        try {
+          if (originalBackupPath && target.filePath) {
+            await restoreModuleBackup(target.filePath, originalBackupPath)
+            await removeModuleFile({ name: merged.name || target.name, filePath: movedPath })
+          } else {
+            await moveModuleFile(
+              { name: merged.name || target.name, filePath: movedPath },
+              originalSaveDir,
+              target.name,
+            )
+          }
+          message += "；已撤销本次模块移动"
+        } catch (rollbackError) {
+          message += `；模块移动回滚失败：${String((rollbackError as any)?.message ?? rollbackError)}`
+        }
+      }
+      setStage(`修改失败：${message}`)
     } finally {
       setBusy(false)
     }

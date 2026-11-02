@@ -1,4 +1,5 @@
 import { Path } from "scripting"
+import { replaceTextVerified, writeTextVerified } from "./verified_write"
 
 export type ModuleBackup = {
   path: string
@@ -17,7 +18,19 @@ function fmOrThrow(): any {
 
 async function fileExists(path: string): Promise<boolean> {
   const fm = fmOrThrow()
-  if (typeof fm.exists === "function") return !!(await fm.exists(path))
+  if (typeof fm.exists === "function") {
+    if (await fm.exists(path)) return true
+    // iCloud File Provider can briefly report false while the security-scoped
+    // bookmark can still read the file. Do not skip the recovery point in that
+    // window.
+    if (typeof fm.readAsString === "function") {
+      try {
+        await fm.readAsString(path)
+        return true
+      } catch {}
+    }
+    return false
+  }
   if (typeof fm.existsSync === "function") return !!fm.existsSync(path)
   return false
 }
@@ -34,19 +47,6 @@ async function ensureDirectory(path: string): Promise<void> {
     return
   }
   throw new Error("FileManager.createDirectory 不可用")
-}
-
-async function writeString(path: string, content: string): Promise<void> {
-  const fm = fmOrThrow()
-  if (typeof fm.writeAsString === "function") {
-    await fm.writeAsString(path, content)
-    return
-  }
-  if (typeof fm.writeAsStringSync === "function") {
-    fm.writeAsStringSync(path, content)
-    return
-  }
-  throw new Error("FileManager.writeAsString 不可用")
 }
 
 async function removeFile(path: string): Promise<void> {
@@ -84,6 +84,10 @@ function decodeModuleName(value: string): string {
 
 function backupPathName(path: string): string {
   return String(path).split("/").pop() ?? String(path)
+}
+
+function normalizedPath(path: string): string {
+  return String(path ?? "").replace(/\\/g, "/").replace(/\/+$/, "")
 }
 
 function parseBackup(path: string): ModuleBackup | null {
@@ -151,11 +155,7 @@ export async function backupModulePath(path: string): Promise<string | null> {
     backupPath = Path.join(directory, `${name}.${timestamp}.sgmodule.bak`)
   }
 
-  await writeString(backupPath, content)
-  if (typeof fm.readAsString === "function") {
-    const saved = String(await fm.readAsString(backupPath) ?? "")
-    if (saved !== content) throw new Error(`备份校验失败：${backupPath}`)
-  }
+  await writeTextVerified(backupPath, content, "模块备份")
   await pruneBackups(target)
   return backupPath
 }
@@ -174,11 +174,15 @@ export async function restoreModuleBackup(path: string, backupPath: string): Pro
   const source = String(backupPath ?? "").trim()
   if (!target || !source || !(await fileExists(source))) throw new Error("备份文件不存在")
 
+  const expectedDirectory = normalizedPath(backupDirectoryFor(target))
+  const actualDirectory = normalizedPath(Path.dirname(source))
+  if (actualDirectory !== expectedDirectory || !parseBackup(source)) {
+    throw new Error("备份路径无效，已拒绝覆盖模块")
+  }
+
   const fm = fmOrThrow()
   if (typeof fm.readAsString !== "function") throw new Error("FileManager.readAsString 不可用")
   const content = String(await fm.readAsString(source) ?? "")
   if (await fileExists(target)) await backupModulePath(target)
-  await writeString(target, content)
-  const saved = String(await fm.readAsString(target) ?? "")
-  if (saved !== content) throw new Error(`回滚后校验失败：${target}`)
+  await replaceTextVerified(target, content, "模块回滚")
 }

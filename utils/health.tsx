@@ -1,5 +1,11 @@
-import { type ModuleInfo } from "./storage"
+import { Path } from "scripting"
+import {
+  getSurgeBookmarkRoot,
+  isPathWithin,
+  type ModuleInfo,
+} from "./storage"
 import { validateSurgeModuleText } from "./module_validation"
+import { extractLocalModuleResourceReferences } from "./script_localizer_core"
 
 export type ModuleHealthIssue = {
   moduleName: string
@@ -25,6 +31,34 @@ async function fileExists(path: string): Promise<boolean> {
   if (typeof fm.exists === "function") return !!(await fm.exists(path))
   if (typeof fm.existsSync === "function") return !!fm.existsSync(path)
   return false
+}
+
+function inferProfileRoot(modulePath: string): string {
+  const normalized = String(modulePath ?? "").replace(/\\/g, "/")
+  const parts = normalized.split("/")
+  const index = Math.max(
+    parts.map((item) => item.toLowerCase()).lastIndexOf("module"),
+    parts.map((item) => item.toLowerCase()).lastIndexOf("modules"),
+  )
+  if (index > 0) return parts.slice(0, index).join("/")
+  return Path.dirname(Path.dirname(modulePath))
+}
+
+async function verifyLocalResources(
+  content: string,
+  modulePath: string,
+  profileRoot: string,
+): Promise<string[]> {
+  const references = extractLocalModuleResourceReferences(content)
+  if (!references.length) return []
+  const root = profileRoot || inferProfileRoot(modulePath)
+  const missing: string[] = []
+  for (const reference of references) {
+    const value = String(reference.value ?? "").trim()
+    const resourcePath = value.startsWith("/") ? value : Path.join(root, value)
+    if (!(await fileExists(resourcePath))) missing.push(value)
+  }
+  return Array.from(new Set(missing))
 }
 
 function isSupportedModuleLink(link: string): boolean {
@@ -58,6 +92,7 @@ function addDuplicateIssues(
 export async function inspectModuleHealth(modules: ModuleInfo[]): Promise<ModuleHealthReport> {
   const issues: ModuleHealthIssue[] = []
   const fm = fmOrThrow()
+  const profileRoot = await getSurgeBookmarkRoot()
 
   addDuplicateIssues(modules, issues, "name", "模块名称")
   addDuplicateIssues(modules, issues, "link", "下载链接")
@@ -72,6 +107,10 @@ export async function inspectModuleHealth(modules: ModuleInfo[]): Promise<Module
     if (!(await fileExists(path))) {
       issues.push({ moduleName, level: "error", message: "模块文件不存在或书签权限失效" })
       continue
+    }
+
+    if (profileRoot && !isPathWithin(profileRoot, path)) {
+      issues.push({ moduleName, level: "error", message: "模块文件不在已授权的 iCloud Drive/Surge 目录内" })
     }
 
     let content = ""
@@ -97,6 +136,15 @@ export async function inspectModuleHealth(modules: ModuleInfo[]): Promise<Module
     }
     if (!content.trim()) {
       issues.push({ moduleName, level: "error", message: "文件内容为空" })
+    }
+
+    const missingResources = await verifyLocalResources(content, path, profileRoot)
+    if (missingResources.length) {
+      issues.push({
+        moduleName,
+        level: "error",
+        message: `本地资源不存在或路径不一致：${missingResources.slice(0, 6).join("、")}${missingResources.length > 6 ? "…" : ""}`,
+      })
     }
   }
 

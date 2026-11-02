@@ -10,6 +10,7 @@ import {
   type RemoteModuleResourceReference,
 } from "./script_localizer_core"
 import type { ModuleInfo } from "./storage"
+import { replaceTextVerified, restoreTextSnapshot, snapshotText } from "./verified_write"
 
 const RESOURCE_FETCH_TIMEOUT_MS = 30 * 1000
 const RESOURCE_FILE_OPERATION_TIMEOUT_MS = 15 * 1000
@@ -288,30 +289,6 @@ async function ensureDirectory(path: string): Promise<void> {
   throw new Error("FileManager.createDirectory 不可用")
 }
 
-async function removeFile(path: string): Promise<void> {
-  const fm = fmOrThrow()
-  try {
-    if (typeof fm.remove === "function") {
-      await fm.remove(path)
-      return
-    }
-    if (typeof fm.removeSync === "function") fm.removeSync(path)
-  } catch {}
-}
-
-async function writeString(path: string, content: string): Promise<void> {
-  const fm = fmOrThrow()
-  if (typeof fm.writeAsString === "function") {
-    await fm.writeAsString(path, content)
-    return
-  }
-  if (typeof fm.writeAsStringSync === "function") {
-    fm.writeAsStringSync(path, content)
-    return
-  }
-  throw new Error("FileManager.writeAsString 不可用")
-}
-
 async function readString(path: string): Promise<string> {
   const fm = fmOrThrow()
   if (typeof fm.readAsString !== "function") throw new Error("FileManager.readAsString 不可用")
@@ -408,32 +385,37 @@ function upsertLocalResourcesTag(content: string): string {
 }
 
 async function writeResourceFile(path: string, content: string): Promise<FileChange> {
-  const existed = await resourceFileExists(path)
-  const previous = existed ? await readString(path) : undefined
+  const snapshot = await snapshotText(path, RESOURCE_FILE_OPERATION_TIMEOUT_MS)
   await ensureDirectory(Path.dirname(path))
-  await withTimeout(
-    () => writeString(path, content),
+  await replaceTextVerified(
+    path,
+    content,
+    "模块资源",
     RESOURCE_FILE_OPERATION_TIMEOUT_MS,
-    `写入模块资源超时（${RESOURCE_FILE_OPERATION_TIMEOUT_MS / 1000}s）：${path}`,
   )
-  const saved = await withTimeout(
-    () => readString(path),
-    RESOURCE_FILE_OPERATION_TIMEOUT_MS,
-    `模块资源校验超时（${RESOURCE_FILE_OPERATION_TIMEOUT_MS / 1000}s）：${path}`,
-  )
-  if (saved !== content) throw new Error(`模块资源写入后校验失败：${path}`)
-  return { path, existed, previous }
+  return {
+    path,
+    existed: snapshot.exists,
+    previous: snapshot.exists ? snapshot.content : undefined,
+  }
 }
 
 async function rollbackChanges(changes: FileChange[]): Promise<void> {
+  const failures: string[] = []
   for (const change of [...changes].reverse()) {
     try {
-      if (change.existed) {
-        await writeString(change.path, change.previous ?? "")
-      } else {
-        await removeFile(change.path)
-      }
-    } catch {}
+      await restoreTextSnapshot(
+        change.path,
+        { exists: change.existed, content: change.previous ?? "" },
+        "模块资源回滚",
+        RESOURCE_FILE_OPERATION_TIMEOUT_MS,
+      )
+    } catch (error) {
+      failures.push(`${change.path}: ${String((error as any)?.message ?? error)}`)
+    }
+  }
+  if (failures.length) {
+    throw new Error(`模块资源回滚失败：${failures.join("；")}`)
   }
 }
 

@@ -10,8 +10,10 @@ import {
   moduleFilePath,
   requireSurgeProfileDir,
   updateModuleMetadata,
+  writeModuleFileVerified,
   type ModuleInfo,
 } from "./storage"
+import { writeTextVerified } from "./verified_write"
 
 const SYNC_DIR_NAME = "SurgeModulesManager"
 const METADATA_FILE_NAME = "metadata.json"
@@ -166,10 +168,12 @@ async function buildMetadata(): Promise<MetadataFile> {
 
 export async function exportMetadataToICloud(): Promise<MetadataExportResult> {
   const fm = fmOrThrow()
-  if (!fm?.writeAsString) throw new Error("FileManager.writeAsString 不可用")
+  if (!fm || (typeof fm.writeAsString !== "function" && typeof fm.writeAsStringSync !== "function")) {
+    throw new Error("FileManager.writeAsString 不可用")
+  }
   const path = await iCloudMetadataPath()
   const metadata = await buildMetadata()
-  await fm.writeAsString(path, JSON.stringify(metadata, null, 2))
+  await writeTextVerified(path, JSON.stringify(metadata, null, 2), "iCloud 元数据")
   return { path, count: metadata.modules.length }
 }
 
@@ -250,10 +254,12 @@ function placeholderContent(item: MetadataModule): string {
 
 async function savePlaceholderModule(item: MetadataModule, targetDir: string): Promise<void> {
   const fm = fmOrThrow()
-  if (!fm?.writeAsString) throw new Error("FileManager.writeAsString 不可用")
+  if (!fm || (typeof fm.writeAsString !== "function" && typeof fm.writeAsStringSync !== "function")) {
+    throw new Error("FileManager.writeAsString 不可用")
+  }
   await requireSurgeProfileDir(targetDir)
   await ensureDir(targetDir)
-  await fm.writeAsString(moduleFilePath(item.name, targetDir), placeholderContent(item))
+  await writeModuleFileVerified(moduleFilePath(item.name, targetDir), placeholderContent(item))
 }
 
 export async function importMetadataFromFile(

@@ -8,11 +8,11 @@ import {
   type ModuleInfo,
   getModulesDirResolved,
   requireSurgeProfileDir,
+  writeModuleFileVerified,
 } from "./storage"
 import { downloadWithProgress } from "./stream_downloader"
 import { validateSurgeModuleText } from "./module_validation"
 import { withTimeout } from "./async"
-import { backupModulePath } from "./backups"
 import { localizeModuleResources, syncLocalModuleResourcePaths } from "./script_localizer"
 
 export type DownloadModuleOptions = {
@@ -28,17 +28,6 @@ export type DownloadModuleOptions = {
 }
 
 const FETCH_TIMEOUT_MS = 30 * 1000
-const FILE_OPERATION_TIMEOUT_MS = 15 * 1000
-
-async function writeString(fm: any, path: string, content: string): Promise<void> {
-  const writer = typeof fm?.writeAsString === "function"
-    ? fm.writeAsString
-    : fm?.writeAsStringSync
-  if (typeof writer !== "function") throw new Error("FileManager.writeAsString 不可用")
-  const result = writer.call(fm, path, content)
-  if (result && typeof result.then === "function") await result
-  if (result === false) throw new Error(`FileManager 拒绝写入：${path}`)
-}
 
 function fetchTimeoutMessage(url: string): string {
   if (/^https?:\/\/script\.hub(?:\/|$)/i.test(url)) {
@@ -201,25 +190,7 @@ async function writeFinalModule(
   const content = localized?.content ?? normalized?.content ?? preparedContent
 
   try {
-    await backupModulePath(path)
-    await withTimeout(
-      () => writeString(fm, path, content),
-      FILE_OPERATION_TIMEOUT_MS,
-      `写入模块超时（${FILE_OPERATION_TIMEOUT_MS / 1000}s）：${path}`,
-    )
-    // File-provider bookmarks may accept a write request before the provider
-    // has actually committed it. Read the file back when supported so an
-    // import cannot report success while nothing reached Surge's directory.
-    if (typeof fm.readAsString === "function") {
-      const saved = String(
-        await withTimeout(
-          () => fm.readAsString(path),
-          FILE_OPERATION_TIMEOUT_MS,
-          `写入校验超时（${FILE_OPERATION_TIMEOUT_MS / 1000}s）：${path}`,
-        ),
-      )
-      if (saved !== content) throw new Error(`写入后校验失败：${path}`)
-    }
+    await writeModuleFileVerified(path, content)
     return {
       path,
       localizedResources: localized?.localizedCount ?? normalized?.migratedCount ?? 0,
@@ -243,7 +214,9 @@ export async function writeModuleText(
   options: Pick<DownloadModuleOptions, "localizeResources" | "repairMissingResources" | "isLocal"> = {},
 ): Promise<{ ok: boolean; message?: string; path?: string; localizedResources?: number }> {
   const fm: any = (globalThis as any).FileManager
-  if (!fm?.writeAsString) return { ok: false, message: "FileManager.writeAsString 不可用" }
+  if (!fm || (typeof fm.writeAsString !== "function" && typeof fm.writeAsStringSync !== "function")) {
+    return { ok: false, message: "FileManager.writeAsString 不可用" }
+  }
   try {
     // A file shared from Files is already the converted module. Keep its
     // metadata byte-for-byte unless the optional script-localization switch is
@@ -264,22 +237,7 @@ export async function writeModuleText(
       : null
     const content = localized?.content ?? normalized?.content ?? preparedContent
     try {
-      await backupModulePath(path)
-      await withTimeout(
-        () => writeString(fm, path, content),
-        FILE_OPERATION_TIMEOUT_MS,
-        `写入本地模块超时（${FILE_OPERATION_TIMEOUT_MS / 1000}s）：${path}`,
-      )
-      if (typeof fm.readAsString === "function") {
-        const saved = String(
-          await withTimeout(
-            () => fm.readAsString(path),
-            FILE_OPERATION_TIMEOUT_MS,
-            `本地模块校验超时（${FILE_OPERATION_TIMEOUT_MS / 1000}s）：${path}`,
-          ),
-        )
-        if (saved !== content) throw new Error(`写入后校验失败：${path}`)
-      }
+      await writeModuleFileVerified(path, content)
       return {
         ok: true,
         path,
@@ -349,7 +307,7 @@ export async function downloadModule(
   await ensureStorage()
 
   const fm: any = (globalThis as any).FileManager
-  if (!fm?.writeAsString) {
+  if (!fm || (typeof fm.writeAsString !== "function" && typeof fm.writeAsStringSync !== "function")) {
     return { ok: false, message: "FileManager.writeAsString 不可用" }
   }
   if (options.mode !== "direct" && !fm?.readAsString) {

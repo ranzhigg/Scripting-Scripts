@@ -1,6 +1,7 @@
 import { Path } from "scripting"
 import { loadConfig } from "./config"
-import { backupModulePath } from "./backups"
+import { backupModulePath, restoreModuleBackup } from "./backups"
+import { replaceTextVerified } from "./verified_write"
 
 export type ModuleInfo = {
   name: string
@@ -46,7 +47,20 @@ async function callMaybeAsync(fn: any, thisArg: any, args: any[]) {
 }
 
 function normalizePath(path: string): string {
-  return String(path ?? "").replace(/\/+$/, "")
+  const raw = String(path ?? "").replace(/\\/g, "/")
+  const absolute = raw.startsWith("/")
+  const parts: string[] = []
+  for (const part of raw.split("/")) {
+    if (!part || part === ".") continue
+    if (part === "..") {
+      if (parts.length && parts[parts.length - 1] !== "..") parts.pop()
+      else if (!absolute) parts.push(part)
+      continue
+    }
+    parts.push(part)
+  }
+  const normalized = `${absolute ? "/" : ""}${parts.join("/")}`
+  return normalized === "/" ? normalized : normalized.replace(/\/+$/, "")
 }
 
 function pickRootDir(): string {
@@ -232,6 +246,22 @@ export async function ensureStorage(): Promise<void> {
     return
   }
   throw new Error("请先在设置中选择有效的 iCloud Drive/Surge 配置目录；不会回退到 Scripting 私有目录")
+}
+
+/**
+ * The single write path for module正文.
+ *
+ * Keep the bookmark guard, backup, read-back verification, and failure
+ * rollback together so metadata edits, imports, and downloaded modules cannot
+ * silently diverge in their write semantics.
+ */
+export async function writeModuleFileVerified(path: string, content: string): Promise<void> {
+  const target = String(path ?? "").trim()
+  if (!target) throw new Error("模块目标路径为空")
+  await requireSurgeProfileDir(Path.dirname(target))
+  await ensureDir(Path.dirname(target))
+  await backupModulePath(target)
+  await replaceTextVerified(target, String(content ?? ""), "模块")
 }
 
 function extractNameFromPath(p: string): string {
@@ -544,14 +574,38 @@ export async function moveModuleFile(
   if (normalizePath(from) === normalizePath(to)) return to
   await ensureDir(baseDir)
   if (!(await exists(from))) return to
+  if (await exists(to)) throw new Error(`目标模块已存在，已拒绝覆盖：${to}`)
 
   if (typeof fm.rename === "function") {
-    await fm.rename(from, to)
-    return to
+    try {
+      await fm.rename(from, to)
+      if (!(await exists(to))) throw new Error(`模块移动后无法读取目标文件：${to}`)
+      return to
+    } catch (error) {
+      // A provider may complete the rename and then fail its acknowledgement.
+      // Only attempt the exact inverse when the source is gone and the new
+      // file is visible; never remove either side as a recovery shortcut.
+      try {
+        if (!(await exists(from)) && await exists(to)) await fm.rename(to, from)
+      } catch (rollbackError) {
+        throw new Error(`模块移动失败：${String((error as any)?.message ?? error)}；移动回滚失败：${String((rollbackError as any)?.message ?? rollbackError)}`)
+      }
+      throw error
+    }
   }
   if (typeof fm.renameSync === "function") {
-    fm.renameSync(from, to)
-    return to
+    try {
+      fm.renameSync(from, to)
+      if (!(await exists(to))) throw new Error(`模块移动后无法读取目标文件：${to}`)
+      return to
+    } catch (error) {
+      try {
+        if (!(await exists(from)) && await exists(to)) fm.renameSync(to, from)
+      } catch (rollbackError) {
+        throw new Error(`模块移动失败：${String((error as any)?.message ?? error)}；移动回滚失败：${String((rollbackError as any)?.message ?? rollbackError)}`)
+      }
+      throw error
+    }
   }
   throw new Error("FileManager.rename 不可用")
 }
@@ -567,6 +621,7 @@ export async function detectLinkPrefix(target: ModuleInfo | string): Promise<str
 export async function removeModuleFile(target: ModuleInfo | string): Promise<void> {
   const fm = fmOrThrow()
   const path = resolveModulePath(target)
+  await requireSurgeProfileDir(Path.dirname(path))
   if (!(await exists(path))) return
   if (typeof fm.remove === "function") {
     await fm.remove(path)
@@ -583,13 +638,18 @@ export async function renameModuleFile(oldTarget: ModuleInfo | string, newName: 
   const fm = fmOrThrow()
   const from = resolveModulePath(oldTarget)
   const to = Path.join(Path.dirname(from), `${newName}.sgmodule`)
+  await requireSurgeProfileDir(Path.dirname(from))
   if (!(await exists(from))) return
+  if (normalizePath(from) === normalizePath(to)) return
+  if (await exists(to)) throw new Error(`目标模块已存在，已拒绝覆盖：${to}`)
   if (typeof fm.rename === "function") {
     await fm.rename(from, to)
+    if (!(await exists(to))) throw new Error(`模块重命名后无法读取目标文件：${to}`)
     return
   }
   if (typeof fm.renameSync === "function") {
     fm.renameSync(from, to)
+    if (!(await exists(to))) throw new Error(`模块重命名后无法读取目标文件：${to}`)
     return
   }
   throw new Error("FileManager.rename 不可用")
@@ -666,8 +726,7 @@ export async function updateModuleMetadata(
   if (info.localScripts !== undefined) {
     content = upsertTag(content, "local-scripts", info.localScripts ? "true" : "")
   }
-  await backupModulePath(path)
-  await fm.writeAsString(path, content)
+  await writeModuleFileVerified(path, content)
 }
 
 export async function listDirectSubDirs(baseDir?: string): Promise<string[]> {
@@ -713,6 +772,7 @@ export async function loadCategoriesFromModules(baseDir?: string): Promise<{
 export async function renameCategoryInModules(oldName: string, newName: string, baseDir?: string): Promise<void> {
   const fm = fmOrThrow()
   const files = await listModuleFilesFromSearchDirectories(await getModulesDirResolved(baseDir))
+  const pending: { path: string; content: string; backupPath: string | null }[] = []
   for (const path of files) {
     let text = ""
     try {
@@ -722,9 +782,35 @@ export async function renameCategoryInModules(oldName: string, newName: string, 
     }
     const cat = parseTag(text, "category")
     if (!cat || cat !== oldName) continue
-    let content = upsertTag(text, "category", newName)
-    await backupModulePath(path)
-    await fm.writeAsString(path, content)
+    const content = upsertTag(text, "category", newName)
+    // Create all recovery points before changing any module, so a File
+    // Provider failure halfway through a category rename cannot leave a
+    // partially renamed set.
+    const backupPath = await backupModulePath(path)
+    if (!backupPath) throw new Error(`分类改名前模块已消失，已停止批量写入：${path}`)
+    pending.push({ path, content, backupPath })
+  }
+
+  const changed: typeof pending = []
+  try {
+    for (const item of pending) {
+      await writeModuleFileVerified(item.path, item.content)
+      changed.push(item)
+    }
+  } catch (error) {
+    const failures: string[] = []
+    for (const item of [...changed].reverse()) {
+      if (!item.backupPath) continue
+      try {
+        await restoreModuleBackup(item.path, item.backupPath)
+      } catch (rollbackError) {
+        failures.push(`${item.path}: ${String((rollbackError as any)?.message ?? rollbackError)}`)
+      }
+    }
+    if (failures.length) {
+      throw new Error(`分类改名失败：${String((error as any)?.message ?? error)}；批量回滚失败：${failures.join("；")}`)
+    }
+    throw error
   }
 }
 
