@@ -18,9 +18,16 @@
 https://raw.githubusercontent.com/ranzhigg/Scripting-Scripts/main/Magnet-MoviePilot-115.user.js
 ```
 
-在 Scripting 的 Safari Browser Scripts 扩展中选择“从 URL 安装”并粘贴上面的地址。它不绑定色花：任意网页检测到 BT 磁力后都会显示 `MP 115` 面板，逐条调用 `P115StrmHelper/add_offline_task`。
+在 Scripting 的 Safari Browser Scripts 扩展中选择“从 URL 安装”并粘贴上面的地址。它不绑定色花：任意网页检测到 BT 磁力后都会显示 `MP / 115` 面板。
 
-每位用户都要在脚本菜单中配置自己的 MoviePilot 地址、API Key 和 115 目录；目录留空时使用 P115StrmHelper 默认目录。MoviePilot 地址只填写 API 基地址，例如 `http://10.0.200.10:3000`，不要带 `#/login`；脚本会自动清理前端路由和末尾斜杠。支持单条推送和“全部推送未提交磁力”，失败项可单独重试。仓库不包含任何个人地址、目录或密钥。
+脚本支持两条提交路线：
+
+- 有 MoviePilot 时，调用 `P115StrmHelper/add_offline_task`；地址只填写 API 基地址，例如 `http://10.0.200.10:3000`，不要带 `#/login`。
+- 没有 MoviePilot 时，可填写自己的 115 Cookie，脚本直接调用 115 离线接口；目录可填写 `/影视/待整理` 这样的路径，也可填写目录 ID，不存在的路径会按层级创建。
+
+在脚本菜单中配置 MoviePilot、115 Cookie、离线目录和提交优先级。默认 `auto` 为 MoviePilot 优先，失败时才回退到 115；也可设为 `mp` 或 `115`。Cookie 只保存在当前设备的 Scripting 脚本存储中，不会上传到本仓库，也不会写入通知或日志；共享脚本前请不要把 Cookie 填进源码。
+
+面板支持单条推送、批量推送和失败重试。`播放` 菜单可输入 115 文件 pickcode、文件 ID、路径或已有 HTTP 地址，支持 Infuse、VLC、浏览器和自定义 URL Scheme。使用 MoviePilot 播放时不需要把 Cookie 放进脚本，使用纯 115 模式播放时需要 Cookie 和文件 pickcode。播放器能否访问地址仍取决于当前网络是否能访问 MoviePilot/115/CDN。
 
 ## 首次配置
 
