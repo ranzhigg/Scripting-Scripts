@@ -10,6 +10,18 @@
 
 脚本不需要 Mac Surge、Node.js 或 Scriptable。使用 Script-Hub 转换功能时，需在 Surge 中启用对应的 Script-Hub 模块和重写。
 
+## 通用磁力 → MoviePilot 115
+
+仓库同时提供一个适用于 Scripting Safari Browser Scripts 的通用 userscript：
+
+```text
+https://raw.githubusercontent.com/ranzhigg/Scripting-Scripts/main/Magnet-MoviePilot-115.user.js
+```
+
+在 Scripting 的 Safari Browser Scripts 扩展中选择“从 URL 安装”并粘贴上面的地址。它不绑定色花：任意网页检测到 BT 磁力后都会显示 `MP 115` 面板，逐条调用 `P115StrmHelper/add_offline_task`。
+
+每位用户都要在脚本菜单中配置自己的 MoviePilot 地址、API Key 和 115 目录；目录留空时使用 P115StrmHelper 默认目录。仓库不包含任何个人地址、目录或密钥。
+
 ## 首次配置
 
 1. 确认 Scripting 已获得 iCloud Drive 权限，且能看到 `iCloud Drive/Surge`。
