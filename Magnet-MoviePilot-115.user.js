@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         通用磁力 → MoviePilot 115 离线
 // @namespace    https://github.com/ranzhigg/scripting-scripts
-// @version      0.1.1
+// @version      0.2.0
 // @description  在任意资源页识别 BT 磁力，一键提交到 MoviePilot 的 115 离线目录。
 // @author       ranzhi
 // @match        http://*/*
@@ -41,6 +41,7 @@
     fab: null,
     scanTimer: null,
     observer: null,
+    batchWorking: false,
   }
 
   const $ = (selector, root = document) => root.querySelector(selector)
@@ -165,6 +166,18 @@
     return String(body?.msg || body?.message || body?.detail || fallback)
   }
 
+  function errorMessage(error, fallback = '网络请求失败') {
+    if (error instanceof Error && error.message) return error.message
+    if (typeof error === 'string' && error) return error
+    return String(error?.error || error?.message || error?.responseText || fallback)
+  }
+
+  function apiEnvelope(body) {
+    return body?.data && typeof body.data === 'object' && body.data.code !== undefined
+      ? body.data
+      : body
+  }
+
   async function requestMoviePilot(path, options = {}) {
     const { apiKey } = state.config
     const baseUrl = normalizeMpUrl(state.config.mpUrl)
@@ -194,9 +207,27 @@
     return user?.username || user?.name || '连接成功'
   }
 
+  async function submitOfflineLinks(links) {
+    const uniqueLinks = [...new Set(links.map(cleanMagnet).filter(Boolean))]
+    if (!uniqueLinks.length) throw new Error('没有可提交的磁力链接')
+    const body = await requestMoviePilot(`/api/v1/plugin/${MP_PLUGIN_ID}/add_offline_task`, {
+      method: 'POST',
+      body: {
+        links: uniqueLinks,
+        path: state.config.offlinePath || null,
+      },
+      timeout: 60000,
+    })
+    const envelope = apiEnvelope(body)
+    if (typeof envelope?.code === 'number' && envelope.code !== 0) {
+      throw new Error(responseMessage(envelope, '115 离线转存失败'))
+    }
+    return envelope
+  }
+
   async function pushMagnet(item) {
     const current = state.pushState.get(item.magnet) || 'idle'
-    if (current === 'working') return
+    if (current === 'working' || state.batchWorking) return
     if (!state.config.mpUrl || !state.config.apiKey) {
       await openSettings()
       if (!state.config.mpUrl || !state.config.apiKey) return
@@ -205,28 +236,48 @@
     state.pushState.set(item.magnet, 'working')
     renderList()
     try {
-      const body = await requestMoviePilot(`/api/v1/plugin/${MP_PLUGIN_ID}/add_offline_task`, {
-        method: 'POST',
-        body: {
-          links: [item.magnet],
-          path: state.config.offlinePath || null,
-        },
-        timeout: 60000,
-      })
-      const envelope = body?.data && typeof body.data === 'object' && body.data.code !== undefined
-        ? body.data
-        : body
-      if (typeof envelope?.code === 'number' && envelope.code !== 0) {
-        throw new Error(responseMessage(envelope, '115 离线转存失败'))
-      }
+      const envelope = await submitOfflineLinks([item.magnet])
       const duplicate = /已存在|重复|already/i.test(responseMessage(envelope, ''))
       state.pushState.set(item.magnet, duplicate ? 'duplicate' : 'success')
       const title = duplicate ? '115 任务已存在' : '115 离线提交成功'
       notify(title, `${shortText(item.label, 50)}\n目录：${state.config.offlinePath || 'P115StrmHelper 默认目录'}`)
     } catch (error) {
       state.pushState.set(item.magnet, 'error')
-      notify('115 离线提交失败', error?.message || String(error))
+      notify('115 离线提交失败', errorMessage(error))
     } finally {
+      renderList()
+    }
+  }
+
+  async function pushPendingMagnets() {
+    if (state.batchWorking) return
+    const pending = state.magnets.filter(item => {
+      const status = state.pushState.get(item.magnet) || 'idle'
+      return status !== 'success' && status !== 'duplicate' && status !== 'working'
+    })
+    if (!pending.length) {
+      notify('没有待推送磁力', '当前页面的磁力都已提交或正在处理中。')
+      return
+    }
+    if (!state.config.mpUrl || !state.config.apiKey) {
+      await openSettings()
+      if (!state.config.mpUrl || !state.config.apiKey) return
+    }
+
+    state.batchWorking = true
+    pending.forEach(item => state.pushState.set(item.magnet, 'working'))
+    renderList()
+    try {
+      const envelope = await submitOfflineLinks(pending.map(item => item.magnet))
+      const message = responseMessage(envelope, `${pending.length} 条任务已提交`)
+      const duplicate = /已存在|重复|already/i.test(message)
+      pending.forEach(item => state.pushState.set(item.magnet, duplicate ? 'duplicate' : 'success'))
+      notify(duplicate ? '115 任务已存在' : '115 批量提交成功', `${message}\n共处理 ${pending.length} 条磁力`)
+    } catch (error) {
+      pending.forEach(item => state.pushState.set(item.magnet, 'error'))
+      notify('115 批量提交失败', errorMessage(error))
+    } finally {
+      state.batchWorking = false
       renderList()
     }
   }
@@ -339,7 +390,7 @@
             : status === 'error'
               ? '重试'
               : '推送 115'
-      push.disabled = status === 'working'
+      push.disabled = status === 'working' || state.batchWorking
       push.addEventListener('click', () => pushMagnet(item))
       const copy = document.createElement('button')
       copy.className = 'mp115-copy'
@@ -380,6 +431,7 @@
       <div class="mp115-body" data-role="list"></div>
       <div class="mp115-foot">
         <button data-action="refresh">重新扫描</button>
+        <button data-action="batch">全部推送</button>
         <button data-action="settings">配置 MP</button>
       </div>
     `
@@ -389,6 +441,7 @@
     panel.querySelectorAll('[data-action="settings"]').forEach(button => button.addEventListener('click', openSettings))
     $('[data-action="close"]', panel).addEventListener('click', () => panel.classList.remove('open'))
     $('[data-action="refresh"]', panel).addEventListener('click', scanMagnets)
+    $('[data-action="batch"]', panel).addEventListener('click', pushPendingMagnets)
     updateFab()
   }
 

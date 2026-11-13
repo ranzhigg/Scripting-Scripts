@@ -19,3 +19,4 @@
 - 新增 `Magnet-MoviePilot-115.user.js`：适用于 Scripting Safari Browser Scripts 的通用磁力推送脚本。
 - 直接调用 P115StrmHelper 的 115 离线任务接口，支持用户自定义目录，不绑定单一站点。
 - 自动清理 MoviePilot 地址中的 `#/login`、`/login` 等前端路由，避免拼接 API 时产生无效 URL。
+- 增加批量推送未提交磁力、统一响应解析和失败项重试，减少多磁力逐条请求失败。

@@ -20,7 +20,7 @@ https://raw.githubusercontent.com/ranzhigg/Scripting-Scripts/main/Magnet-MoviePi
 
 在 Scripting 的 Safari Browser Scripts 扩展中选择“从 URL 安装”并粘贴上面的地址。它不绑定色花：任意网页检测到 BT 磁力后都会显示 `MP 115` 面板，逐条调用 `P115StrmHelper/add_offline_task`。
 
-每位用户都要在脚本菜单中配置自己的 MoviePilot 地址、API Key 和 115 目录；目录留空时使用 P115StrmHelper 默认目录。MoviePilot 地址只填写 API 基地址，例如 `http://10.0.200.10:3000`，不要带 `#/login`；脚本会自动清理前端路由和末尾斜杠。仓库不包含任何个人地址、目录或密钥。
+每位用户都要在脚本菜单中配置自己的 MoviePilot 地址、API Key 和 115 目录；目录留空时使用 P115StrmHelper 默认目录。MoviePilot 地址只填写 API 基地址，例如 `http://10.0.200.10:3000`，不要带 `#/login`；脚本会自动清理前端路由和末尾斜杠。支持单条推送和“全部推送未提交磁力”，失败项可单独重试。仓库不包含任何个人地址、目录或密钥。
 
 ## 首次配置
 
