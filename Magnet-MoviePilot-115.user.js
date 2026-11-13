@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         通用磁力 → MoviePilot 115（双路线）
 // @namespace    https://github.com/ranzhigg/scripting-scripts/dual-route
-// @version      0.3.2
-// @description  在任意资源页识别 BT 磁力，可通过 MoviePilot 或 115 Cookie 离线转存，并拉起常用播放器。
+// @version      0.4.0
+// @description  在任意资源页识别 BT 磁力，可通过 MoviePilot 或 115 Cookie 离线转存。
 // @author       ranzhi
 // @updateURL    https://raw.githubusercontent.com/ranzhigg/Scripting-Scripts/main/Magnet-MoviePilot-115.user.js
 // @downloadURL  https://raw.githubusercontent.com/ranzhigg/Scripting-Scripts/main/Magnet-MoviePilot-115.user.js
@@ -20,7 +20,6 @@
 // @connect      115.com
 // @connect      my.115.com
 // @connect      webapi.115.com
-// @connect      proapi.115.com
 // @run-at       document-end
 // @inject-into  content
 // ==/UserScript==
@@ -34,14 +33,10 @@
     cookie: 'generic_magnet_115_cookie',
     offlinePath: 'generic_magnet_mp_offline_path',
     route: 'generic_magnet_route',
-    player: 'generic_magnet_player',
-    playerTemplate: 'generic_magnet_player_template',
   }
   // 公开脚本不写入任何人的私人目录；留空时由 P115StrmHelper 使用自身默认目录。
   const DEFAULT_OFFLINE_PATH = ''
   const DEFAULT_ROUTE = 'auto'
-  const DEFAULT_PLAYER = 'infuse'
-  const DEFAULT_PLAYER_TEMPLATE = ''
   const MP_PLUGIN_ID = 'P115StrmHelper'
   const MAGNET_PREFIX = 'magnet:?xt=urn:btih:'
 
@@ -52,8 +47,6 @@
       cookie: '',
       offlinePath: DEFAULT_OFFLINE_PATH,
       route: DEFAULT_ROUTE,
-      player: DEFAULT_PLAYER,
-      playerTemplate: DEFAULT_PLAYER_TEMPLATE,
     },
     magnets: [],
     pushState: new Map(),
@@ -493,112 +486,6 @@
     }
   }
 
-  function findHttpUrl(value, depth = 0) {
-    if (depth > 5 || value === null || value === undefined) return ''
-    if (typeof value === 'string' && /^https?:\/\//i.test(value)) return value
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        const found = findHttpUrl(item, depth + 1)
-        if (found) return found
-      }
-      return ''
-    }
-    if (typeof value !== 'object') return ''
-    for (const key of ['file_url_302', 'url', 'file_url', 'download_url']) {
-      const found = findHttpUrl(value[key], depth + 1)
-      if (found) return found
-    }
-    for (const item of Object.values(value)) {
-      const found = findHttpUrl(item, depth + 1)
-      if (found) return found
-    }
-    return ''
-  }
-
-  async function get115PlaybackUrl(target) {
-    const raw = String(target || '').trim()
-    if (/^https?:\/\//i.test(raw)) return raw
-    if (!/^[A-Za-z0-9]{10,32}$/.test(raw)) {
-      throw new Error('115 直连播放请输入文件 pickcode，或粘贴已有的 HTTP 播放地址')
-    }
-    try {
-      const body = await request115('https://proapi.115.com/app/chrome/downurl', {
-        method: 'POST',
-        body: { pickcode: raw },
-        timeout: 30000,
-      })
-      const url = findHttpUrl(body)
-      if (url) return url
-    } catch (_) {}
-    const query = new URLSearchParams({ pickcode: raw, dl: '1' })
-    const body = await request115(`https://webapi.115.com/files/download?${query}`, { timeout: 30000 })
-    const url = findHttpUrl(body)
-    if (!url) throw new Error(responseMessage(body, '115 未返回可播放直链'))
-    return url
-  }
-
-  function getMpPlaybackUrl(target) {
-    const baseUrl = normalizeMpUrl(state.config.mpUrl)
-    if (!baseUrl) throw new Error('没有可用的 MoviePilot 地址')
-    const raw = String(target || '').trim()
-    if (!raw) throw new Error('请输入 115 文件 pickcode、文件路径或已有播放地址')
-    if (/^https?:\/\/.*\/api\/v1\/plugin\/P115StrmHelper\/redirect_url/i.test(raw)) return raw
-    if (/^https?:\/\//i.test(raw)) return raw
-    if (/^[A-Za-z0-9]{10,32}$/.test(raw)) {
-      return `${baseUrl}/api/v1/plugin/${MP_PLUGIN_ID}/redirect_url?pickcode=${encodeURIComponent(raw)}`
-    }
-    if (/^\d+$/.test(raw) || raw.includes('/')) {
-      return `${baseUrl}/api/v1/plugin/${MP_PLUGIN_ID}/redirect_url/${encodeURIComponent(raw)}`
-    }
-    throw new Error('请输入有效的 115 pickcode、文件 ID 或文件路径')
-  }
-
-  async function resolvePlaybackUrl(target) {
-    const useDirect115 = state.config.route === '115' || !state.config.mpUrl
-    if (!useDirect115 && state.config.mpUrl) return getMpPlaybackUrl(target)
-    if (state.config.cookie) return get115PlaybackUrl(target)
-    if (state.config.mpUrl) return getMpPlaybackUrl(target)
-    throw new Error('请先配置 MoviePilot 地址，或配置 115 Cookie')
-  }
-
-  function buildPlayerUrl(playbackUrl) {
-    const encoded = encodeURIComponent(playbackUrl)
-    switch (state.config.player) {
-      case 'vlc':
-        return `vlc-x-callback://x-callback-url/stream?url=${encoded}`
-      case 'browser':
-        return playbackUrl
-      case 'custom':
-        if (!state.config.playerTemplate || !state.config.playerTemplate.includes('{url}')) {
-          throw new Error('自定义播放器模板必须包含 {url} 占位符')
-        }
-        return state.config.playerTemplate.split('{url}').join(encoded)
-      case 'infuse':
-      default:
-        return `infuse://x-callback-url/play?url=${encoded}`
-    }
-  }
-
-  async function launchPlayer() {
-    if (!state.config.mpUrl && !state.config.cookie) {
-      await openSettings()
-      if (!state.config.mpUrl && !state.config.cookie) return
-    }
-    const target = window.prompt(
-      'MoviePilot 模式可输入 115 pickcode、文件 ID、完整路径或已有 HTTP 播放地址\n纯 115 Cookie 模式请填写文件 pickcode，或粘贴已有 HTTP 播放地址。',
-      '',
-    )
-    if (target === null || !target.trim()) return
-    try {
-      const playbackUrl = await resolvePlaybackUrl(target)
-      const playerUrl = buildPlayerUrl(playbackUrl)
-      notify('正在拉起播放器', state.config.player === 'browser' ? '将在当前浏览器打开播放地址' : `播放器：${state.config.player}`)
-      window.location.href = playerUrl
-    } catch (error) {
-      notify('播放器拉起失败', errorMessage(error))
-    }
-  }
-
   async function openSettings() {
     const current = state.config
     const url = window.prompt('MoviePilot 地址（可留空，留空后使用 115 Cookie 直连）', current.mpUrl)
@@ -611,14 +498,6 @@
     if (path === null) return
     const route = window.prompt('提交通道：auto=MoviePilot 优先并可回退 115，mp=仅 MoviePilot，115=仅 Cookie 直连', current.route || DEFAULT_ROUTE)
     if (route === null) return
-    const player = window.prompt('播放器：infuse / vlc / browser / custom', current.player || DEFAULT_PLAYER)
-    if (player === null) return
-    let playerTemplate = current.playerTemplate || DEFAULT_PLAYER_TEMPLATE
-    if (player.trim().toLowerCase() === 'custom') {
-      const template = window.prompt('自定义 URL Scheme 模板，使用 {url} 占位符（示例：myplayer://play?url={url}）', playerTemplate)
-      if (template === null) return
-      playerTemplate = template.trim()
-    }
 
     try {
       state.config.mpUrl = normalizeMpUrl(url)
@@ -632,8 +511,6 @@
     else if (cookie.trim()) state.config.cookie = cookie.trim()
     state.config.offlinePath = path.trim() || DEFAULT_OFFLINE_PATH
     state.config.route = /^(auto|mp|115)$/i.test(route.trim()) ? route.trim().toLowerCase() : DEFAULT_ROUTE
-    state.config.player = /^(infuse|vlc|browser|custom)$/i.test(player.trim()) ? player.trim().toLowerCase() : DEFAULT_PLAYER
-    state.config.playerTemplate = playerTemplate
     state.p115 = { uid: '', sign: '', time: '', path: '', pathId: '' }
     await Promise.all([
       GM.setValue(STORE.mpUrl, state.config.mpUrl),
@@ -641,20 +518,18 @@
       GM.setValue(STORE.cookie, state.config.cookie),
       GM.setValue(STORE.offlinePath, state.config.offlinePath),
       GM.setValue(STORE.route, state.config.route),
-      GM.setValue(STORE.player, state.config.player),
-      GM.setValue(STORE.playerTemplate, state.config.playerTemplate),
     ])
     if (state.config.mpUrl && state.config.apiKey) {
       try {
         const user = await verifyMoviePilot()
-        notify('配置已保存', `MoviePilot：${user}\n115 目录：${state.config.offlinePath || '默认目录'}\n播放器：${state.config.player}`)
+        notify('配置已保存', `MoviePilot：${user}\n115 目录：${state.config.offlinePath || '默认目录'}`)
       } catch (error) {
         notify('配置已保存，但 MoviePilot 连接测试失败', error?.message || String(error))
       }
     } else if (state.config.cookie) {
       try {
         await get115Session()
-        notify('配置已保存', `115 Cookie 可用\n目录：${state.config.offlinePath || '115 默认目录'}\n播放器：${state.config.player}`)
+        notify('配置已保存', `115 Cookie 可用\n目录：${state.config.offlinePath || '115 默认目录'}`)
       } catch (error) {
         notify('配置已保存，但 115 Cookie 测试失败', error?.message || String(error))
       }
@@ -783,7 +658,6 @@
       <div class="mp115-foot">
         <button data-action="refresh">重新扫描</button>
         <button data-action="batch">全部推送</button>
-        <button data-action="play">播放</button>
         <button data-action="settings">配置</button>
       </div>
     `
@@ -794,7 +668,6 @@
     $('[data-action="close"]', panel).addEventListener('click', () => panel.classList.remove('open'))
     $('[data-action="refresh"]', panel).addEventListener('click', scanMagnets)
     $('[data-action="batch"]', panel).addEventListener('click', pushPendingMagnets)
-    $('[data-action="play"]', panel).addEventListener('click', launchPlayer)
     updateFab()
   }
 
@@ -810,16 +683,12 @@
     state.config.offlinePath = String(await GM.getValue(STORE.offlinePath, DEFAULT_OFFLINE_PATH) || DEFAULT_OFFLINE_PATH).trim()
     const savedRoute = String(await GM.getValue(STORE.route, DEFAULT_ROUTE) || DEFAULT_ROUTE).trim().toLowerCase()
     state.config.route = /^(auto|mp|115)$/.test(savedRoute) ? savedRoute : DEFAULT_ROUTE
-    const savedPlayer = String(await GM.getValue(STORE.player, DEFAULT_PLAYER) || DEFAULT_PLAYER).trim().toLowerCase()
-    state.config.player = /^(infuse|vlc|browser|custom)$/.test(savedPlayer) ? savedPlayer : DEFAULT_PLAYER
-    state.config.playerTemplate = String(await GM.getValue(STORE.playerTemplate, DEFAULT_PLAYER_TEMPLATE) || DEFAULT_PLAYER_TEMPLATE).trim()
   }
 
   await loadConfig()
   if (!document.body) return
   createPanel()
   GM.registerMenuCommand('配置 MoviePilot 115', openSettings)
-  GM.registerMenuCommand('播放 115 文件', launchPlayer)
   scanMagnets()
   state.observer = new MutationObserver(scheduleScan)
   state.observer.observe(document.body, { childList: true, subtree: true })

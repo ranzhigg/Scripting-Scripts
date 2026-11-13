@@ -27,7 +27,7 @@ https://raw.githubusercontent.com/ranzhigg/Scripting-Scripts/main/Magnet-MoviePi
 
 在脚本菜单中配置 MoviePilot、115 Cookie、离线目录和提交优先级。默认 `auto` 为 MoviePilot 优先，失败时才回退到 115；也可设为 `mp` 或 `115`。Cookie 只保存在当前设备的 Scripting 脚本存储中，不会上传到本仓库，也不会写入通知或日志；共享脚本前请不要把 Cookie 填进源码。
 
-面板支持单条推送、批量推送和失败重试。`播放` 菜单可输入 115 文件 pickcode、文件 ID、路径或已有 HTTP 地址，支持 Infuse、VLC、浏览器和自定义 URL Scheme。使用 MoviePilot 播放时不需要把 Cookie 放进脚本，使用纯 115 模式播放时需要 Cookie 和文件 pickcode。播放器能否访问地址仍取决于当前网络是否能访问 MoviePilot/115/CDN。
+面板支持单条推送、批量推送和失败重试。脚本只负责把磁力提交到 MoviePilot 或 115，不依赖离线完成后的 pickcode，也不内置播放器拉起；下载完成后可按用户自己的 MP/115 播放链路处理。
 
 ## 首次配置
 
