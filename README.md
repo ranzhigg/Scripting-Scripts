@@ -18,7 +18,7 @@
 https://raw.githubusercontent.com/ranzhigg/Scripting-Scripts/main/Magnet-MoviePilot-115.user.js
 ```
 
-在 Scripting 的 Safari Browser Scripts 扩展中选择“从 URL 安装”并粘贴上面的地址。它不绑定色花：任意网页检测到 BT 磁力后都会显示 `MP / 115` 面板。
+在 Scripting 的 Safari Browser Scripts 扩展中选择“从 URL 安装”并粘贴上面的地址。当前发布身份为“通用磁力 → MoviePilot 115（双路线）”；如果设备里还留有旧的 `0.2.0` 条目，请以新名称的脚本为准。
 
 脚本支持两条提交路线：
 

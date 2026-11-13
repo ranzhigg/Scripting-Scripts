@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         通用磁力 → MoviePilot 115 离线
-// @namespace    https://github.com/ranzhigg/scripting-scripts
-// @version      0.3.1
+// @name         通用磁力 → MoviePilot 115（双路线）
+// @namespace    https://github.com/ranzhigg/scripting-scripts/dual-route
+// @version      0.3.2
 // @description  在任意资源页识别 BT 磁力，可通过 MoviePilot 或 115 Cookie 离线转存，并拉起常用播放器。
 // @author       ranzhi
 // @updateURL    https://raw.githubusercontent.com/ranzhigg/Scripting-Scripts/main/Magnet-MoviePilot-115.user.js
