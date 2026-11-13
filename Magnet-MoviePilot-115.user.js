@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         通用磁力 → MoviePilot 115 离线
 // @namespace    https://github.com/ranzhigg/scripting-scripts
-// @version      0.1.0
+// @version      0.1.1
 // @description  在任意资源页识别 BT 磁力，一键提交到 MoviePilot 的 115 离线目录。
 // @author       ranzhi
 // @match        http://*/*
@@ -44,6 +44,21 @@
   }
 
   const $ = (selector, root = document) => root.querySelector(selector)
+
+  function normalizeMpUrl(value) {
+    let raw = String(value || '').trim()
+    if (!raw) return ''
+    try {
+      const parsed = new URL(raw)
+      if (!/^https?:$/.test(parsed.protocol)) throw new Error('仅支持 http:// 或 https:// 地址')
+      parsed.search = ''
+      parsed.hash = ''
+      parsed.pathname = parsed.pathname.replace(/\/(?:login|home|dashboard)\/?$/i, '/')
+      return parsed.toString().replace(/\/+$/, '')
+    } catch (_) {
+      throw new Error('MoviePilot 地址应填写类似 http://10.0.200.10:3000 的 API 基地址')
+    }
+  }
 
   function cleanMagnet(value) {
     let text = String(value || '')
@@ -151,11 +166,12 @@
   }
 
   async function requestMoviePilot(path, options = {}) {
-    const { mpUrl, apiKey } = state.config
-    if (!mpUrl || !apiKey) throw new Error('请先配置 MoviePilot 地址和 API Key')
+    const { apiKey } = state.config
+    const baseUrl = normalizeMpUrl(state.config.mpUrl)
+    if (!baseUrl || !apiKey) throw new Error('请先配置 MoviePilot 地址和 API Key')
     const response = await gmRequest({
       method: options.method || 'GET',
-      url: `${mpUrl.replace(/\/+$/, '')}${path}`,
+      url: `${baseUrl}${path}`,
       headers: {
         Accept: 'application/json',
         'X-API-KEY': apiKey,
@@ -224,7 +240,12 @@
     const path = window.prompt('115 离线目录（可留空，使用 P115StrmHelper 默认目录）', current.offlinePath || '')
     if (path === null) return
 
-    state.config.mpUrl = url.trim().replace(/\/+$/, '')
+    try {
+      state.config.mpUrl = normalizeMpUrl(url)
+    } catch (error) {
+      notify('MoviePilot 地址无效', error?.message || String(error))
+      return
+    }
     if (apiKey.trim()) state.config.apiKey = apiKey.trim()
     state.config.offlinePath = path.trim() || DEFAULT_OFFLINE_PATH
     await Promise.all([
@@ -372,7 +393,12 @@
   }
 
   async function loadConfig() {
-    state.config.mpUrl = String(await GM.getValue(STORE.mpUrl, '') || '').trim().replace(/\/+$/, '')
+    const savedUrl = String(await GM.getValue(STORE.mpUrl, '') || '').trim()
+    try {
+      state.config.mpUrl = normalizeMpUrl(savedUrl)
+    } catch (_) {
+      state.config.mpUrl = savedUrl
+    }
     state.config.apiKey = String(await GM.getValue(STORE.apiKey, '') || '').trim()
     state.config.offlinePath = String(await GM.getValue(STORE.offlinePath, DEFAULT_OFFLINE_PATH) || DEFAULT_OFFLINE_PATH).trim()
   }
