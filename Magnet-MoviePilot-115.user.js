@@ -20,6 +20,7 @@
 // @connect      115.com
 // @connect      my.115.com
 // @connect      webapi.115.com
+// @connect      proapi.115.com
 // @run-at       document-end
 // @inject-into  content
 // ==/UserScript==
@@ -520,6 +521,15 @@
     if (!/^[A-Za-z0-9]{10,32}$/.test(raw)) {
       throw new Error('115 直连播放请输入文件 pickcode，或粘贴已有的 HTTP 播放地址')
     }
+    try {
+      const body = await request115('https://proapi.115.com/app/chrome/downurl', {
+        method: 'POST',
+        body: { pickcode: raw },
+        timeout: 30000,
+      })
+      const url = findHttpUrl(body)
+      if (url) return url
+    } catch (_) {}
     const query = new URLSearchParams({ pickcode: raw, dl: '1' })
     const body = await request115(`https://webapi.115.com/files/download?${query}`, { timeout: 30000 })
     const url = findHttpUrl(body)
@@ -575,7 +585,7 @@
       if (!state.config.mpUrl && !state.config.cookie) return
     }
     const target = window.prompt(
-      '输入 115 文件 pickcode、文件 ID、完整路径，或已有 HTTP 播放地址\n没有 MoviePilot 时直连模式目前建议填写 pickcode。',
+      'MoviePilot 模式可输入 115 pickcode、文件 ID、完整路径或已有 HTTP 播放地址\n纯 115 Cookie 模式请填写文件 pickcode，或粘贴已有 HTTP 播放地址。',
       '',
     )
     if (target === null || !target.trim()) return
