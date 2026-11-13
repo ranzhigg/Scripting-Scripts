@@ -10,6 +10,8 @@ export type AppConfig = {
   remoteHost: string
   remotePort: string
   remotePassword: string
+  /** Surge HTTP API accepts X-Key; Bearer is useful for clients that cannot set X-Key. */
+  remoteAuthMode: "x-key" | "bearer"
 }
 
 const KEY = "surge_modules_manager_cfg_v1"
@@ -25,6 +27,7 @@ const DEFAULT_CONFIG: AppConfig = {
   remoteHost: "http://127.0.0.1",
   remotePort: "6171",
   remotePassword: "",
+  remoteAuthMode: "x-key",
 }
 
 function normalizeDownloadConcurrency(value: unknown): number {
@@ -68,6 +71,7 @@ export function loadConfig(): AppConfig {
     const remoteHost = String(obj?.remoteHost ?? DEFAULT_CONFIG.remoteHost).trim() || DEFAULT_CONFIG.remoteHost
     const remotePort = String(obj?.remotePort ?? DEFAULT_CONFIG.remotePort).trim() || DEFAULT_CONFIG.remotePort
     const remotePassword = String(obj?.remotePassword ?? "")
+    const remoteAuthMode = obj?.remoteAuthMode === "bearer" ? "bearer" : "x-key"
     return {
       ...DEFAULT_CONFIG,
       ...obj,
@@ -81,6 +85,7 @@ export function loadConfig(): AppConfig {
       remoteHost,
       remotePort,
       remotePassword,
+      remoteAuthMode,
     }
   } catch {
     return DEFAULT_CONFIG
@@ -100,6 +105,7 @@ export function saveConfig(cfg: AppConfig): void {
     remoteHost: String(cfg.remoteHost ?? DEFAULT_CONFIG.remoteHost).trim() || DEFAULT_CONFIG.remoteHost,
     remotePort: String(cfg.remotePort ?? DEFAULT_CONFIG.remotePort).trim() || DEFAULT_CONFIG.remotePort,
     remotePassword: String(cfg.remotePassword ?? ""),
+    remoteAuthMode: cfg.remoteAuthMode === "bearer" ? "bearer" : "x-key",
   }
   if (st?.set) {
     // Storage officially supports JSON values and returns a success flag.

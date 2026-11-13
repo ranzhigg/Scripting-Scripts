@@ -3,16 +3,75 @@ import { withTimeout } from "./async"
 
 const REMOTE_REQUEST_TIMEOUT_MS = 8 * 1000
 const NEW_MODULE_DISABLE_TIMEOUT_MS = 2500
+const REMOTE_API_PREFIX = "/v1"
 
 export type RemoteConnectionResult = {
   latencyMs: number
   enabledCount: number
 }
 
+export type CaptureFilterScope = "in-memory" | "on-disk"
+export type CaptureFilterType = "off" | "with-keywords" | "without-keywords" | "pattern"
+
+export type CaptureFilter = {
+  httpOnly?: boolean
+  hideCrashReporterRequests?: boolean
+  hideAppleRequests?: boolean
+  hideUDP?: boolean
+  type?: CaptureFilterType
+  keywords?: string[]
+  disabledKeywords?: string[]
+}
+
+export type CaptureFiltersResponse = {
+  active?: CaptureFilterScope
+  filters?: Partial<Record<CaptureFilterScope, CaptureFilter>>
+}
+
+export type CaptureSession = {
+  name: string
+  active?: boolean
+  requestCount?: number
+  size?: number
+  endReason?: string
+}
+
+export type SurgePoliciesResponse = {
+  proxies?: string[]
+  "policy-groups"?: string[]
+  "external-policies"?: { name?: string; group?: string; identifier?: string }[]
+}
+
 export function getRemoteBaseURL(cfg: AppConfig): string {
-  const host = String(cfg.remoteHost ?? "http://127.0.0.1").trim() || "http://127.0.0.1"
+  const rawHost = String(cfg.remoteHost ?? "http://127.0.0.1").trim() || "http://127.0.0.1"
   const port = String(cfg.remotePort ?? "").trim()
-  return port ? `${host.replace(/\/+$/, "")}:${port}` : ""
+
+  let parsed: URL
+  try {
+    parsed = new URL(/^[a-z][a-z\d+.-]*:\/\//i.test(rawHost) ? rawHost : `http://${rawHost}`)
+  } catch {
+    throw new Error("Surge HTTP API 地址不是有效 URL")
+  }
+  if (port && (!/^\d{1,5}$/.test(port) || Number(port) < 1 || Number(port) > 65535)) {
+    throw new Error("Surge HTTP API 端口必须是 1–65535")
+  }
+  // Accept either the host form or a previously copied `/v1` API URL. Keep
+  // the origin only so every endpoint is composed exactly once.
+  parsed.pathname = ""
+  parsed.search = ""
+  parsed.hash = ""
+  if (!parsed.port && !port) return ""
+  if (!parsed.port) parsed.port = port
+  if (parsed.username || parsed.password) throw new Error("Surge HTTP API 地址不能包含账号或密码")
+  return parsed.toString().replace(/\/$/, "")
+}
+
+export function getRemoteAPIURL(cfg: AppConfig, path: string): string {
+  const base = getRemoteBaseURL(cfg)
+  if (!base) return ""
+  const suffix = String(path ?? "").trim()
+  if (!suffix) return `${base}${REMOTE_API_PREFIX}`
+  return `${base}${suffix === "/v1" || suffix.startsWith("/v1/") ? suffix : `${REMOTE_API_PREFIX}/${suffix.replace(/^\/+/, "")}`}`
 }
 
 export function getModuleRemoteName(module: { name: string; surgeName?: string }): string {
@@ -20,10 +79,42 @@ export function getModuleRemoteName(module: { name: string; surgeName?: string }
 }
 
 function remoteHeaders(cfg: AppConfig): Record<string, string> {
-  return {
-    "X-Key": String(cfg.remotePassword ?? ""),
+  const key = String(cfg.remotePassword ?? "")
+  const headers: Record<string, string> = {
     "Content-Type": "application/json",
+    Accept: "application/json",
   }
+  if (cfg.remoteAuthMode === "bearer") headers.Authorization = `Bearer ${key}`
+  else headers["X-Key"] = key
+  return headers
+}
+
+async function remoteRequest(
+  cfg: AppConfig,
+  path: string,
+  init: { method?: "GET" | "POST"; body?: Record<string, unknown> } = {},
+  timeoutMs = REMOTE_REQUEST_TIMEOUT_MS,
+): Promise<any> {
+  const url = getRemoteAPIURL(cfg, path)
+  if (!url) throw new Error("请先配置 Surge HTTP API 地址和端口")
+  const fetchFn: any = (globalThis as any).fetch
+  if (typeof fetchFn !== "function") throw new Error("fetch 不可用")
+  const res = await withTimeout(
+    () => fetchFn(url, {
+      method: init.method ?? "GET",
+      headers: remoteHeaders(cfg),
+      ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+    }),
+    timeoutMs,
+    `Surge HTTP API 请求超时（${timeoutMs / 1000}s）：${path}`,
+  )
+  let data: any = null
+  try { data = await res.json() } catch {}
+  if (!res?.ok) {
+    const detail = data?.error ? `：${String(data.error)}` : ""
+    throw new Error(`Surge HTTP API ${res?.status ?? "unknown"}${detail}`)
+  }
+  return data
 }
 
 function parseEnabledNames(data: any): Set<string> {
@@ -43,21 +134,8 @@ function parseEnabledNames(data: any): Set<string> {
 }
 
 export async function fetchEnabledModuleNames(cfg: AppConfig): Promise<Set<string>> {
-  const baseURL = getRemoteBaseURL(cfg)
-  if (!baseURL) return new Set()
-  const fetchFn: any = (globalThis as any).fetch
-  if (typeof fetchFn !== "function") throw new Error("fetch 不可用")
-
-  const res = await withTimeout(
-    () => fetchFn(`${baseURL}/v1/modules`, {
-      method: "GET",
-      headers: remoteHeaders(cfg),
-    }),
-    REMOTE_REQUEST_TIMEOUT_MS,
-    `远程状态请求超时（${REMOTE_REQUEST_TIMEOUT_MS / 1000}s）`,
-  )
-  if (!res?.ok) throw new Error(`请求失败：${res?.status ?? "unknown"}`)
-  const data = await res.json()
+  if (!getRemoteBaseURL(cfg)) return new Set()
+  const data = await remoteRequest(cfg, "/modules")
   return parseEnabledNames(data)
 }
 
@@ -82,21 +160,67 @@ export async function setRemoteModuleEnabled(
   enabled: boolean,
   timeoutMs = REMOTE_REQUEST_TIMEOUT_MS,
 ): Promise<void> {
-  const baseURL = getRemoteBaseURL(cfg)
-  if (!baseURL) throw new Error("请先配置 HTTP 远程控制端口")
-  const fetchFn: any = (globalThis as any).fetch
-  if (typeof fetchFn !== "function") throw new Error("fetch 不可用")
+  await remoteRequest(cfg, "/modules", {
+    method: "POST",
+    body: { [moduleName]: enabled },
+  }, timeoutMs)
+}
 
-  const res = await withTimeout(
-    () => fetchFn(`${baseURL}/v1/modules`, {
-      method: "POST",
-      headers: remoteHeaders(cfg),
-      body: JSON.stringify({ [moduleName]: enabled }),
-    }),
-    timeoutMs,
-    `远程开关请求超时（${timeoutMs / 1000}s）`,
-  )
-  if (!res?.ok) throw new Error(`请求失败：${res?.status ?? "unknown"}`)
+export async function fetchSurgePolicies(cfg: AppConfig): Promise<SurgePoliciesResponse> {
+  return await remoteRequest(cfg, "/policies")
+}
+
+export async function fetchAvoidedPolicies(cfg: AppConfig): Promise<Set<string>> {
+  const data = await remoteRequest(cfg, "/policies/avoided")
+  return new Set(Array.isArray(data?.policies) ? data.policies.map((item: any) => String(item).trim()).filter(Boolean) : [])
+}
+
+export async function setPolicyAvoided(
+  cfg: AppConfig,
+  policyName: string,
+  avoided: boolean,
+): Promise<Set<string>> {
+  const name = String(policyName ?? "").trim()
+  if (!name) throw new Error("策略名称为空")
+  const data = await remoteRequest(cfg, "/policies/avoided", {
+    method: "POST",
+    body: { policy_name: name, avoided },
+  })
+  return new Set(Array.isArray(data?.policies) ? data.policies.map((item: any) => String(item).trim()).filter(Boolean) : [])
+}
+
+export async function fetchCaptureFilters(cfg: AppConfig): Promise<CaptureFiltersResponse> {
+  return await remoteRequest(cfg, "/capture/filters")
+}
+
+export async function setCaptureFilter(
+  cfg: AppConfig,
+  scope: CaptureFilterScope,
+  filter: CaptureFilter,
+): Promise<CaptureFilter> {
+  const data = await remoteRequest(cfg, "/capture/filters", {
+    method: "POST",
+    body: { scope, ...filter },
+  })
+  return data?.filter ?? data
+}
+
+export async function fetchCaptureEnabled(cfg: AppConfig): Promise<boolean> {
+  const data = await remoteRequest(cfg, "/features/capture")
+  return !!data?.enabled
+}
+
+export async function setCaptureEnabled(cfg: AppConfig, enabled: boolean): Promise<boolean> {
+  const data = await remoteRequest(cfg, "/features/capture", {
+    method: "POST",
+    body: { enabled },
+  })
+  return !!data?.enabled
+}
+
+export async function fetchCaptureSessions(cfg: AppConfig): Promise<CaptureSession[]> {
+  const data = await remoteRequest(cfg, "/capture/sessions")
+  return Array.isArray(data?.sessions) ? data.sessions : []
 }
 
 /**

@@ -55,6 +55,16 @@ iCloud Drive/Surge/
 - 新导入模块默认保持关闭，请在 Surge 中确认内容后再启用。
 - 旧版本生成的隐藏资源可在“设置” → “清理旧私有资源”中清理；当前的 `Module`、`Script` 和根目录资源不会被删除。
 
+## Surge 高级控制
+
+在“HTTP 远程控制”中可以打开“Surge 高级控制”：
+
+- 策略避让：读取代理策略并临时标记/取消自动策略组避让，仅影响 `url-test`、`fallback`、`load-balance` 和 `smart`，Surge 重启后会清空。
+- HTTP 抓包筛选：分别配置内存请求和磁盘会话的 `off`、关键词包含/排除、`pattern`、HTTP-only、隐藏 Apple/UDP/崩溃报告请求等参数。
+- 抓包会话：读取 Surge 已保存的 HTTP Capture 会话和请求数量。
+
+高级控制使用 Surge HTTP API 的 `/v1` 路径。认证默认是 `X-Key`，也可在远程控制页切换为 `Authorization: Bearer`。开启或停止 HTTP 抓包会关闭现有连接，排查结束后应及时关闭。
+
 ## Script-Hub 转换
 
 1. 打开“Script-Hub”页面。

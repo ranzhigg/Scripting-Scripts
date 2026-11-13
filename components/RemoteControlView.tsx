@@ -4,6 +4,7 @@ import {
   HStack,
   Navigation,
   NavigationStack,
+  Picker,
   Section,
   SecureField,
   Text,
@@ -14,6 +15,7 @@ import {
 
 import { loadConfig, saveConfig, type AppConfig } from "../utils/config"
 import { testRemoteConnection } from "../utils/remote_control"
+import { SurgeToolsView } from "./SurgeToolsView"
 
 export function RemoteControlView(props: {
   initial?: AppConfig
@@ -32,6 +34,7 @@ export function RemoteControlView(props: {
         remoteHost: String(cfg.remoteHost ?? "").trim() || "http://127.0.0.1",
         remotePort: String(cfg.remotePort ?? "").trim(),
         remotePassword: String(cfg.remotePassword ?? ""),
+        remoteAuthMode: cfg.remoteAuthMode === "bearer" ? "bearer" : "x-key",
       })
       await Dialog.alert({
         title: "连接成功",
@@ -54,6 +57,7 @@ export function RemoteControlView(props: {
         remoteHost: String(cfg.remoteHost ?? "").trim() || "http://127.0.0.1",
         remotePort: String(cfg.remotePort ?? "").trim(),
         remotePassword: String(cfg.remotePassword ?? ""),
+        remoteAuthMode: cfg.remoteAuthMode === "bearer" ? "bearer" : "x-key",
       }
       saveConfig(fixed)
       props.onDone?.(fixed)
@@ -116,10 +120,19 @@ export function RemoteControlView(props: {
                 title=""
                 value={cfg.remotePassword}
                 onChanged={(v: string) => setCfg((c) => ({ ...c, remotePassword: v }))}
-                prompt="X-Key 请求头使用的密码"
+                prompt="Surge HTTP API 密钥"
                 frame={{ maxWidth: "infinity" as any, alignment: "leading" as any }}
               />
             </HStack>
+            <Picker
+              title="认证方式"
+              pickerStyle="menu"
+              value={cfg.remoteAuthMode === "bearer" ? 1 : 0}
+              onChanged={(index: number) => setCfg((c) => ({ ...c, remoteAuthMode: index === 1 ? "bearer" : "x-key" }))}
+            >
+              <Text tag={0}>X-Key（默认）</Text>
+              <Text tag={1}>Bearer</Text>
+            </Picker>
             <Button
               title={testing ? "测试连接中…" : "测试连接"}
               systemImage="antenna.radiowaves.left.and.right"
@@ -130,8 +143,16 @@ export function RemoteControlView(props: {
               }}
             />
             <Text font="caption" foregroundStyle="secondaryLabel">
-              使用 Surge HTTP API 的模块状态接口进行测试，不会修改模块开关。
+              使用 Surge HTTP API 的模块状态接口进行测试，不会修改模块开关。默认使用 X-Key；Bearer 适用于只方便发送 Authorization 的环境。
             </Text>
+            <Button
+              title="Surge 高级控制"
+              systemImage="slider.horizontal.3"
+              action={() => {
+                HapticFeedback.mediumImpact()
+                void Navigation.present({ element: <SurgeToolsView initial={cfg} /> })
+              }}
+            />
           </Section>
         </Form>
       </VStack>
